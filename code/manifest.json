@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube MIDI Sampler",
+  "version": "1.0",
+  "description": "Sample colors from YouTube videos and output MIDI",
+  "permissions": [
+    "activeTab"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "js": ["content.js"],
+      "css": ["styles.css"]
+    }
+  ]
+}
