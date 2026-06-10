@@ -668,25 +668,29 @@
         return Math.floor((brightness / 255) * 127);
     }
 
-    function sampleAverageColor(ctx, centerX, centerY, sampleSize) {
-        const halfSize = Math.floor(sampleSize / 2);
-        let totalR = 0, totalG = 0, totalB = 0;
-        let pixelCount = 0;
-        
-        for (let y = centerY - halfSize; y <= centerY + halfSize; y++) {
-            for (let x = centerX - halfSize; x <= centerX + halfSize; x++) {
-                try {
-                    const imageData = ctx.getImageData(x, y, 1, 1);
-                    totalR += imageData.data[0];
-                    totalG += imageData.data[1];
-                    totalB += imageData.data[2];
-                    pixelCount++;
-                } catch (e) {
-                    // Skip pixels outside canvas bounds
-                }
-            }
+    function sampleBoxArea(ctx, x, y, width, height) {
+        // Clamp the box to the canvas bounds
+        const left = Math.max(0, Math.floor(x));
+        const top = Math.max(0, Math.floor(y));
+        const right = Math.min(ctx.canvas.width, Math.ceil(x + width));
+        const bottom = Math.min(ctx.canvas.height, Math.ceil(y + height));
+        const w = right - left;
+        const h = bottom - top;
+
+        if (w <= 0 || h <= 0) {
+            return { r: 0, g: 0, b: 0 };
         }
-        
+
+        const data = ctx.getImageData(left, top, w, h).data;
+        let totalR = 0, totalG = 0, totalB = 0;
+        const pixelCount = w * h;
+
+        for (let i = 0; i < data.length; i += 4) {
+            totalR += data[i];
+            totalG += data[i + 1];
+            totalB += data[i + 2];
+        }
+
         return {
             r: Math.floor(totalR / pixelCount),
             g: Math.floor(totalG / pixelCount),
@@ -964,7 +968,6 @@
                         <span>Δ Only</span>
                     </label>
                     <input type="number" min="1" max="16" value="${s.channel}" data-id="${s.id}" data-prop="channel" placeholder="Ch" title="Channel">
-                    <input type="number" min="1" max="21" step="2" value="${s.sampleSize}" data-id="${s.id}" data-prop="sampleSize" placeholder="Size" title="Sample Size (1=1x1, 3=3x3, 5=5x5, etc.)" style="width: 50px;">
                     ${s.type === 'note' ? `<input type="number" min="0" max="127" value="${s.noteNumber}" data-id="${s.id}" data-prop="noteNumber" placeholder="Note" title="Note Number">` : ''}
                     ${s.type === 'cc' ? `<input type="number" min="0" max="127" value="${s.ccNumber}" data-id="${s.id}" data-prop="ccNumber" placeholder="CC" title="CC Number">` : ''}
                     <input type="number" min="10" max="5000" step="10" value="${s.pollingInterval}" data-id="${s.id}" data-prop="pollingInterval" placeholder="ms" title="Polling Interval (ms)" style="width: 70px;">
