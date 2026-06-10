@@ -26,6 +26,8 @@
     let globalMidiChannel = 1; // Global MIDI channel
     let isUpdatingSamplersList = false; // Prevent refresh loops
     let presets = {}; // Store presets
+    let tempCanvas = null; // Reused across sampleColors ticks
+    let tempCtx = null;
 
     // Note names for display
     const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -636,16 +638,25 @@
     function sampleColors() {
         if (!videoElement) return;
 
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = overlayCanvas.width;
-        tempCanvas.height = overlayCanvas.height;
-        const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
-        
+        const currentTime = Date.now();
+
+        // Skip the tick entirely if no sampler is due
+        if (!samplers.some(s => currentTime - s.lastSampleTime >= s.pollingInterval)) {
+            return;
+        }
+
+        if (!tempCanvas) {
+            tempCanvas = document.createElement('canvas');
+            tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
+        }
+        if (tempCanvas.width !== overlayCanvas.width || tempCanvas.height !== overlayCanvas.height) {
+            tempCanvas.width = overlayCanvas.width;
+            tempCanvas.height = overlayCanvas.height;
+        }
+
         try {
             tempCtx.drawImage(videoElement, 0, 0, tempCanvas.width, tempCanvas.height);
-            
-            const currentTime = Date.now();
-            
+
             samplers.forEach(s => {
                 if (currentTime - s.lastSampleTime >= s.pollingInterval) {
                     // Sample the entire box area, not just center
