@@ -20,6 +20,14 @@
     let maxLogEntries = 20;
     let loggerVisible = false;
     let loggerWindow = null; // Floating window when the logger is popped out
+    let isRecording = false;
+    let recordStartTime = 0;
+    let recordedEvents = []; // {t: ms since record start, bytes: [status, d1, d2?]}
+    let isPlaying = false;
+    let playbackInterval = null;
+    let playbackStartTime = 0;
+    let playbackIndex = 0;
+    let recordings = {}; // Saved named recordings
     let timerInterval = null;
     let globalPollingInterval = 50; // Global default polling rate
     let globalDeltaThreshold = 1; // Global delta threshold for "send on change"
@@ -240,6 +248,41 @@
                 </div>
                 <div class="midi-section">
                     <div class="midi-section-title">
+                        <span>Recorder</span>
+                        <button class="midi-section-help-btn" data-help="recorder" title="About these controls">?</button>
+                    </div>
+                    <div class="midi-help-box" id="midi-help-recorder" style="display: none;">
+                        <ul>
+                            <li><em>● Record</em> – captures every MIDI message sent to the output (notes, note-offs, CCs) with timing, until stopped. Starting a new recording replaces the unsaved one.</li>
+                            <li><em>▶ Play</em> – replays the current recording to the selected output with original timing. Stopping mid-take sends All Notes Off. Playback is not shown in the logger.</li>
+                            <li><em>Save Recording</em> – stores the current take under a name (kept in this browser's local storage). <em>Select Recording</em> loads one; <em>Delete</em> removes it.</li>
+                            <li><em>Edit Events</em> – shows the take as an editable list: change times (ms) and data values, or delete events. Time edits take effect (and re-order) on play.</li>
+                            <li><em>Export .mid</em> – downloads the current recording as a standard MIDI file (format 0, 120 BPM) for any DAW.</li>
+                        </ul>
+                        Tip: enable Δ Only on samplers to keep recordings compact.
+                    </div>
+                    <div class="midi-control-group">
+                        <button id="midi-record-btn">● Record</button>
+                        <button id="midi-play-btn">▶ Play</button>
+                        <span id="midi-record-status">no recording</span>
+                    </div>
+                    <div class="midi-control-group">
+                        <button id="save-recording-btn" title="Save the current recording">Save Recording</button>
+                        <select id="recording-select" title="Load recording">
+                            <option value="">Select Recording...</option>
+                        </select>
+                        <button id="delete-recording-btn" title="Delete selected recording">Delete</button>
+                        <button id="export-recording-btn" title="Download the current recording as a standard MIDI file">Export .mid</button>
+                    </div>
+                    <div class="midi-control-group">
+                        <label>
+                            <input type="checkbox" id="midi-show-events"> Edit Events
+                        </label>
+                    </div>
+                    <div id="midi-event-list" style="display: none;"></div>
+                </div>
+                <div class="midi-section">
+                    <div class="midi-section-title">
                         <span>Logging</span>
                         <button class="midi-section-help-btn" data-help="logging" title="About these controls">?</button>
                     </div>
@@ -409,6 +452,22 @@
             }
         });
 
+        document.getElementById('midi-record-btn').addEventListener('click', () => {
+            if (isRecording) {
+                stopRecording();
+            } else {
+                startRecording();
+            }
+        });
+
+        document.getElementById('midi-play-btn').addEventListener('click', () => {
+            if (isPlaying) {
+                stopPlayback();
+            } else {
+                startPlayback();
+            }
+        });
+
         document.getElementById('global-polling-interval').addEventListener('change', (e) => {
             globalPollingInterval = parseInt(e.target.value) || 50;
             // Update all samplers that don't have custom rates
@@ -438,8 +497,22 @@
         document.getElementById('save-preset-btn').addEventListener('click', savePreset);
         document.getElementById('preset-select').addEventListener('change', loadPreset);
         document.getElementById('delete-preset-btn').addEventListener('click', deletePreset);
-        
+
+        document.getElementById('midi-show-events').addEventListener('change', (e) => {
+            const listEl = document.getElementById('midi-event-list');
+            listEl.style.display = e.target.checked ? 'block' : 'none';
+            if (e.target.checked) {
+                updateEventList();
+            }
+        });
+
+        document.getElementById('save-recording-btn').addEventListener('click', saveRecording);
+        document.getElementById('recording-select').addEventListener('change', loadRecording);
+        document.getElementById('delete-recording-btn').addEventListener('click', deleteRecording);
+        document.getElementById('export-recording-btn').addEventListener('click', exportRecording);
+
         loadPresetsFromStorage();
+        loadRecordingsFromStorage();
 
         overlayCanvas.addEventListener('mousedown', handleMouseDown);
         overlayCanvas.addEventListener('mousemove', handleMouseMove);
@@ -676,12 +749,23 @@
         sendAllNotesOff();
     }
 
+    // All real-time MIDI output goes through here so the recorder
+    // captures exactly what the output device receives
+    function transmit(bytes) {
+        if (!selectedOutput) return;
+        selectedOutput.send(bytes);
+        if (isRecording) {
+            recordedEvents.push({ t: Date.now() - recordStartTime, bytes: Array.from(bytes) });
+            updateRecordStatus();
+        }
+    }
+
     function sendAllNotesOff() {
         if (!selectedOutput) return;
-        
+
         try {
             for (let channel = 0; channel < 16; channel++) {
-                selectedOutput.send([0xB0 | channel, 123, 0]);
+                transmit([0xB0 | channel, 123, 0]);
             }
             logMidi('System', 'All Notes Off (All Channels)', 0);
             updateStatus('All notes off sent');
@@ -797,6 +881,294 @@
         loggerWindow.remove();
         loggerWindow = null;
         document.getElementById('midi-logger-popout-btn').textContent = '⇱ Pop Out';
+    }
+
+    function describeEvent(bytes) {
+        const status = bytes[0] & 0xF0;
+        const ch = (bytes[0] & 0x0F) + 1;
+        switch (status) {
+            case 0x90: return `Note On Ch${ch}`;
+            case 0x80: return `Note Off Ch${ch}`;
+            case 0xB0: return `CC Ch${ch}`;
+            case 0xC0: return `Prog Ch${ch}`;
+            default: return `0x${bytes[0].toString(16)} Ch${ch}`;
+        }
+    }
+
+    function updateEventList() {
+        const listEl = document.getElementById('midi-event-list');
+        if (!listEl || listEl.style.display === 'none') return;
+
+        if (recordedEvents.length === 0) {
+            listEl.innerHTML = '<div class="midi-event-empty">No events recorded</div>';
+            return;
+        }
+
+        const maxEventRows = 1000;
+        listEl.innerHTML = '';
+        const shown = Math.min(recordedEvents.length, maxEventRows);
+        for (let i = 0; i < shown; i++) {
+            const ev = recordedEvents[i];
+            const row = document.createElement('div');
+            row.className = 'midi-event-row';
+            row.innerHTML = `
+                <input type="number" min="0" step="10" value="${ev.t}" data-idx="${i}" data-field="t" title="Time (ms)">
+                <span class="midi-event-desc">${describeEvent(ev.bytes)}</span>
+                <input type="number" min="0" max="127" value="${ev.bytes[1]}" data-idx="${i}" data-field="d1" title="Data 1 (note/CC number)">
+                ${ev.bytes.length > 2 ? `<input type="number" min="0" max="127" value="${ev.bytes[2]}" data-idx="${i}" data-field="d2" title="Data 2 (velocity/value)">` : ''}
+                <button class="midi-event-delete" data-idx="${i}" title="Delete event">×</button>
+            `;
+            listEl.appendChild(row);
+        }
+        if (recordedEvents.length > maxEventRows) {
+            const note = document.createElement('div');
+            note.className = 'midi-event-empty';
+            note.textContent = `Showing first ${maxEventRows} of ${recordedEvents.length} events`;
+            listEl.appendChild(note);
+        }
+
+        listEl.querySelectorAll('input').forEach(inp => {
+            inp.addEventListener('change', (e) => {
+                const idx = parseInt(e.target.dataset.idx);
+                const field = e.target.dataset.field;
+                const value = parseInt(e.target.value) || 0;
+                const ev = recordedEvents[idx];
+                if (!ev) return;
+                if (field === 't') {
+                    ev.t = Math.max(0, value);
+                } else if (field === 'd1') {
+                    ev.bytes[1] = Math.min(127, Math.max(0, value));
+                } else if (field === 'd2') {
+                    ev.bytes[2] = Math.min(127, Math.max(0, value));
+                }
+                updateRecordStatus();
+            });
+        });
+
+        listEl.querySelectorAll('.midi-event-delete').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const idx = parseInt(e.target.dataset.idx);
+                recordedEvents.splice(idx, 1);
+                updateRecordStatus();
+                updateEventList();
+            });
+        });
+    }
+
+    function updateRecordStatus() {
+        const el = document.getElementById('midi-record-status');
+        if (!el) return;
+        if (recordedEvents.length === 0) {
+            el.textContent = isRecording ? 'recording...' : 'no recording';
+            return;
+        }
+        const duration = recordedEvents[recordedEvents.length - 1].t;
+        el.textContent = `${recordedEvents.length} events · ${(duration / 1000).toFixed(1)}s`;
+    }
+
+    function startRecording() {
+        if (isPlaying) stopPlayback();
+        isRecording = true;
+        recordedEvents = [];
+        recordStartTime = Date.now();
+        const btn = document.getElementById('midi-record-btn');
+        btn.textContent = '■ Stop Rec';
+        btn.classList.add('recording');
+        updateRecordStatus();
+        updateStatus('Recording MIDI output...');
+    }
+
+    function stopRecording() {
+        isRecording = false;
+        const btn = document.getElementById('midi-record-btn');
+        btn.textContent = '● Record';
+        btn.classList.remove('recording');
+        updateRecordStatus();
+        updateEventList();
+        updateStatus(`Recorded ${recordedEvents.length} events`);
+    }
+
+    function startPlayback() {
+        if (!selectedOutput) {
+            updateStatus('Select a MIDI output before playing back');
+            return;
+        }
+        if (recordedEvents.length === 0) {
+            updateStatus('Nothing recorded yet');
+            return;
+        }
+        if (isRecording) stopRecording();
+
+        recordedEvents.sort((a, b) => a.t - b.t);
+        isPlaying = true;
+        playbackIndex = 0;
+        playbackStartTime = Date.now();
+        document.getElementById('midi-play-btn').textContent = '■ Stop';
+        updateStatus(`Playing back ${recordedEvents.length} events...`);
+
+        playbackInterval = setInterval(() => {
+            const elapsed = Date.now() - playbackStartTime;
+            while (playbackIndex < recordedEvents.length && recordedEvents[playbackIndex].t <= elapsed) {
+                try {
+                    selectedOutput.send(recordedEvents[playbackIndex].bytes);
+                } catch (err) {
+                    console.error('Playback error:', err);
+                }
+                playbackIndex++;
+            }
+            if (playbackIndex >= recordedEvents.length) {
+                stopPlayback(false);
+                updateStatus('Playback finished');
+            }
+        }, 10);
+    }
+
+    function stopPlayback(cutOffNotes = true) {
+        if (playbackInterval) {
+            clearInterval(playbackInterval);
+            playbackInterval = null;
+        }
+        isPlaying = false;
+        document.getElementById('midi-play-btn').textContent = '▶ Play';
+        if (cutOffNotes) {
+            sendAllNotesOff(); // a mid-take stop can leave notes hanging
+            updateStatus('Playback stopped');
+        }
+    }
+
+    function saveRecording() {
+        if (recordedEvents.length === 0) {
+            updateStatus('Nothing recorded to save');
+            return;
+        }
+        const name = prompt('Enter recording name:');
+        if (!name) return;
+
+        recordings[name] = {
+            events: recordedEvents.map(ev => ({ t: ev.t, bytes: [...ev.bytes] })),
+            savedAt: Date.now()
+        };
+        localStorage.setItem('midiSamplerRecordings', JSON.stringify(recordings));
+        updateRecordingList();
+        updateStatus(`Recording "${name}" saved`);
+    }
+
+    function loadRecording(e) {
+        const name = e.target.value;
+        if (!name || !recordings[name]) return;
+        if (isPlaying) stopPlayback();
+        if (isRecording) stopRecording();
+
+        recordedEvents = recordings[name].events.map(ev => ({ t: ev.t, bytes: [...ev.bytes] }));
+        updateRecordStatus();
+        updateEventList();
+        updateStatus(`Recording "${name}" loaded`);
+    }
+
+    function deleteRecording() {
+        const name = document.getElementById('recording-select').value;
+        if (!name || !recordings[name]) {
+            updateStatus('Select a recording to delete');
+            return;
+        }
+
+        if (confirm(`Delete recording "${name}"?`)) {
+            delete recordings[name];
+            localStorage.setItem('midiSamplerRecordings', JSON.stringify(recordings));
+            updateRecordingList();
+            updateStatus(`Recording "${name}" deleted`);
+        }
+    }
+
+    function loadRecordingsFromStorage() {
+        try {
+            const stored = localStorage.getItem('midiSamplerRecordings');
+            if (stored) {
+                recordings = JSON.parse(stored);
+                updateRecordingList();
+            }
+        } catch (e) {
+            console.error('Error loading recordings:', e);
+        }
+    }
+
+    function writeVarLen(value, out) {
+        let buffer = value & 0x7F;
+        while ((value >>= 7)) {
+            buffer <<= 8;
+            buffer |= ((value & 0x7F) | 0x80);
+        }
+        while (true) {
+            out.push(buffer & 0xFF);
+            if (buffer & 0x80) {
+                buffer >>= 8;
+            } else {
+                break;
+            }
+        }
+    }
+
+    function buildMidiFile(events) {
+        const TPQ = 480; // ticks per quarter note
+        const MS_PER_BEAT = 500; // 120 BPM, so 1 tick ≈ 1.04ms
+
+        const track = [];
+        // Tempo meta event: 500000 µs per beat
+        track.push(0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20);
+
+        const sorted = [...events].sort((a, b) => a.t - b.t);
+        let lastTick = 0;
+        sorted.forEach(ev => {
+            const tick = Math.round(ev.t * TPQ / MS_PER_BEAT);
+            writeVarLen(tick - lastTick, track);
+            lastTick = tick;
+            track.push(...ev.bytes);
+        });
+
+        track.push(0x00, 0xFF, 0x2F, 0x00); // end of track
+
+        const bytes = [
+            0x4D, 0x54, 0x68, 0x64, // MThd
+            0, 0, 0, 6, // header length
+            0, 0, // format 0
+            0, 1, // one track
+            (TPQ >> 8) & 0xFF, TPQ & 0xFF,
+            0x4D, 0x54, 0x72, 0x6B, // MTrk
+            (track.length >>> 24) & 0xFF,
+            (track.length >>> 16) & 0xFF,
+            (track.length >>> 8) & 0xFF,
+            track.length & 0xFF
+        ];
+        return new Uint8Array(bytes.concat(track));
+    }
+
+    function exportRecording() {
+        if (recordedEvents.length === 0) {
+            updateStatus('Nothing recorded to export');
+            return;
+        }
+
+        const data = buildMidiFile(recordedEvents);
+        const blob = new Blob([data], { type: 'audio/midi' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const selectedName = document.getElementById('recording-select').value;
+        a.download = (selectedName || 'midi-sampler-recording') + '.mid';
+        a.click();
+        URL.revokeObjectURL(url);
+        updateStatus(`Exported ${a.download}`);
+    }
+
+    function updateRecordingList() {
+        const select = document.getElementById('recording-select');
+        select.innerHTML = '<option value="">Select Recording...</option>';
+        Object.keys(recordings).forEach(name => {
+            const option = document.createElement('option');
+            option.value = name;
+            option.textContent = name;
+            select.appendChild(option);
+        });
     }
 
     function updateTimers() {
@@ -1026,20 +1398,20 @@
                         const samplerId = sampler.id; // Capture for closure
                         setTimeout(() => {
                             if (selectedOutput) {
-                                selectedOutput.send(noteOffMsg);
+                                transmit(noteOffMsg);
                                 console.log(`[MIDI OUT] Sampler ${samplerId}: ${noteOffMessageName} (delayed ${sampler.noteOffDelay}ms)`);
                                 logMidi(samplerId, noteOffMessageName + ` (delayed ${sampler.noteOffDelay}ms)`, 0);
                             }
                         }, sampler.noteOffDelay);
                     } else {
-                        selectedOutput.send(noteOffMsg);
+                        transmit(noteOffMsg);
                         console.log(`[MIDI OUT] Sampler ${sampler.id}: ${noteOffMessageName}`);
                         logMidi(sampler.id, noteOffMessageName, 0);
                     }
                 }
                 
                 // Send note-on
-                selectedOutput.send([statusByte, data1, data2]);
+                transmit([statusByte, data1, data2]);
                 sampler.lastSentNote = data1; // Track this note for future note-off
                 messageName = `Note On Ch${sampler.channel} Note${data1} Vel${data2}`;
                 if (linkedSampler) {
@@ -1072,7 +1444,7 @@
                     data2 = sampledValue;
                 }
                 
-                selectedOutput.send([statusByte, data1, data2]);
+                transmit([statusByte, data1, data2]);
                 messageName = `CC Ch${sampler.channel} CC${data1} Val${data2}`;
                 if (linkedSampler) {
                     console.log(`[MIDI OUT] Sampler ${sampler.id} (linked with ${linkedSampler.id}): ${messageName}`);
@@ -1082,7 +1454,7 @@
             } else if (sampler.type === 'program') {
                 statusByte = 0xC0 | channel;
                 data1 = sampledValue;
-                selectedOutput.send([statusByte, data1]);
+                transmit([statusByte, data1]);
                 messageName = `Prog Ch${sampler.channel} Prog${data1}`;
                 console.log(`[MIDI OUT] Sampler ${sampler.id}: ${messageName} (RGB: ${sampler.color.r},${sampler.color.g},${sampler.color.b})`);
             }
