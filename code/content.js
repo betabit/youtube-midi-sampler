@@ -360,7 +360,7 @@
                 sendNoteOff: true, // Send note-off messages
                 noteOffDelay: 0, // Delay before sending note-off (ms)
                 sendOnChangeOnly: globalSendOnChangeOnly, // Only send when value changes
-                controlTarget: 'velocity', // 'velocity', 'note', or 'value'
+                controlTarget: 'note', // 'velocity', 'note', 'both', or 'value'
                 linkedSamplerId: null, // ID of sampler to link with
                 quantizeToScale: false,
                 scaleRoot: 60, // C (middle C)
