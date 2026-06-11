@@ -450,6 +450,15 @@
     border-radius: 3px;
 }
 
+#midi-record-btn.recording {
+    background: #ff4a4a !important;
+}
+
+#midi-record-status {
+    font-size: 11px;
+    color: #888;
+}
+
 #midi-logger-window {
     position: fixed;
     top: 200px;

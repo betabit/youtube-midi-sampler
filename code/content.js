@@ -20,6 +20,13 @@
     let maxLogEntries = 20;
     let loggerVisible = false;
     let loggerWindow = null; // Floating window when the logger is popped out
+    let isRecording = false;
+    let recordStartTime = 0;
+    let recordedEvents = []; // {t: ms since record start, bytes: [status, d1, d2?]}
+    let isPlaying = false;
+    let playbackInterval = null;
+    let playbackStartTime = 0;
+    let playbackIndex = 0;
     let timerInterval = null;
     let globalPollingInterval = 50; // Global default polling rate
     let globalDeltaThreshold = 1; // Global delta threshold for "send on change"
@@ -240,6 +247,24 @@
                 </div>
                 <div class="midi-section">
                     <div class="midi-section-title">
+                        <span>Recorder</span>
+                        <button class="midi-section-help-btn" data-help="recorder" title="About these controls">?</button>
+                    </div>
+                    <div class="midi-help-box" id="midi-help-recorder" style="display: none;">
+                        <ul>
+                            <li><em>● Record</em> – captures every MIDI message sent to the output (notes, note-offs, CCs) with timing, until stopped. Starting a new recording replaces the unsaved one.</li>
+                            <li><em>▶ Play</em> – replays the current recording to the selected output with original timing. Stopping mid-take sends All Notes Off. Playback is not shown in the logger.</li>
+                        </ul>
+                        Tip: enable Δ Only on samplers to keep recordings compact.
+                    </div>
+                    <div class="midi-control-group">
+                        <button id="midi-record-btn">● Record</button>
+                        <button id="midi-play-btn">▶ Play</button>
+                        <span id="midi-record-status">no recording</span>
+                    </div>
+                </div>
+                <div class="midi-section">
+                    <div class="midi-section-title">
                         <span>Logging</span>
                         <button class="midi-section-help-btn" data-help="logging" title="About these controls">?</button>
                     </div>
@@ -406,6 +431,22 @@
                 popInLogger();
             } else {
                 popOutLogger();
+            }
+        });
+
+        document.getElementById('midi-record-btn').addEventListener('click', () => {
+            if (isRecording) {
+                stopRecording();
+            } else {
+                startRecording();
+            }
+        });
+
+        document.getElementById('midi-play-btn').addEventListener('click', () => {
+            if (isPlaying) {
+                stopPlayback();
+            } else {
+                startPlayback();
             }
         });
 
@@ -676,12 +717,23 @@
         sendAllNotesOff();
     }
 
+    // All real-time MIDI output goes through here so the recorder
+    // captures exactly what the output device receives
+    function transmit(bytes) {
+        if (!selectedOutput) return;
+        selectedOutput.send(bytes);
+        if (isRecording) {
+            recordedEvents.push({ t: Date.now() - recordStartTime, bytes: Array.from(bytes) });
+            updateRecordStatus();
+        }
+    }
+
     function sendAllNotesOff() {
         if (!selectedOutput) return;
-        
+
         try {
             for (let channel = 0; channel < 16; channel++) {
-                selectedOutput.send([0xB0 | channel, 123, 0]);
+                transmit([0xB0 | channel, 123, 0]);
             }
             logMidi('System', 'All Notes Off (All Channels)', 0);
             updateStatus('All notes off sent');
@@ -797,6 +849,86 @@
         loggerWindow.remove();
         loggerWindow = null;
         document.getElementById('midi-logger-popout-btn').textContent = '⇱ Pop Out';
+    }
+
+    function updateRecordStatus() {
+        const el = document.getElementById('midi-record-status');
+        if (!el) return;
+        if (recordedEvents.length === 0) {
+            el.textContent = isRecording ? 'recording...' : 'no recording';
+            return;
+        }
+        const duration = recordedEvents[recordedEvents.length - 1].t;
+        el.textContent = `${recordedEvents.length} events · ${(duration / 1000).toFixed(1)}s`;
+    }
+
+    function startRecording() {
+        if (isPlaying) stopPlayback();
+        isRecording = true;
+        recordedEvents = [];
+        recordStartTime = Date.now();
+        const btn = document.getElementById('midi-record-btn');
+        btn.textContent = '■ Stop Rec';
+        btn.classList.add('recording');
+        updateRecordStatus();
+        updateStatus('Recording MIDI output...');
+    }
+
+    function stopRecording() {
+        isRecording = false;
+        const btn = document.getElementById('midi-record-btn');
+        btn.textContent = '● Record';
+        btn.classList.remove('recording');
+        updateRecordStatus();
+        updateStatus(`Recorded ${recordedEvents.length} events`);
+    }
+
+    function startPlayback() {
+        if (!selectedOutput) {
+            updateStatus('Select a MIDI output before playing back');
+            return;
+        }
+        if (recordedEvents.length === 0) {
+            updateStatus('Nothing recorded yet');
+            return;
+        }
+        if (isRecording) stopRecording();
+
+        recordedEvents.sort((a, b) => a.t - b.t);
+        isPlaying = true;
+        playbackIndex = 0;
+        playbackStartTime = Date.now();
+        document.getElementById('midi-play-btn').textContent = '■ Stop';
+        updateStatus(`Playing back ${recordedEvents.length} events...`);
+
+        playbackInterval = setInterval(() => {
+            const elapsed = Date.now() - playbackStartTime;
+            while (playbackIndex < recordedEvents.length && recordedEvents[playbackIndex].t <= elapsed) {
+                try {
+                    selectedOutput.send(recordedEvents[playbackIndex].bytes);
+                } catch (err) {
+                    console.error('Playback error:', err);
+                }
+                playbackIndex++;
+            }
+            if (playbackIndex >= recordedEvents.length) {
+                stopPlayback(false);
+                updateStatus('Playback finished');
+            }
+        }, 10);
+    }
+
+    function stopPlayback(cutOffNotes = true) {
+        if (playbackInterval) {
+            clearInterval(playbackInterval);
+            playbackInterval = null;
+        }
+        isPlaying = false;
+        document.getElementById('midi-play-btn').textContent = '▶ Play';
+        if (cutOffNotes) {
+            sendAllNotesOff(); // a mid-take stop can leave notes hanging
+            updateStatus('Playback stopped');
+        }
     }
 
     function updateTimers() {
@@ -1026,20 +1158,20 @@
                         const samplerId = sampler.id; // Capture for closure
                         setTimeout(() => {
                             if (selectedOutput) {
-                                selectedOutput.send(noteOffMsg);
+                                transmit(noteOffMsg);
                                 console.log(`[MIDI OUT] Sampler ${samplerId}: ${noteOffMessageName} (delayed ${sampler.noteOffDelay}ms)`);
                                 logMidi(samplerId, noteOffMessageName + ` (delayed ${sampler.noteOffDelay}ms)`, 0);
                             }
                         }, sampler.noteOffDelay);
                     } else {
-                        selectedOutput.send(noteOffMsg);
+                        transmit(noteOffMsg);
                         console.log(`[MIDI OUT] Sampler ${sampler.id}: ${noteOffMessageName}`);
                         logMidi(sampler.id, noteOffMessageName, 0);
                     }
                 }
                 
                 // Send note-on
-                selectedOutput.send([statusByte, data1, data2]);
+                transmit([statusByte, data1, data2]);
                 sampler.lastSentNote = data1; // Track this note for future note-off
                 messageName = `Note On Ch${sampler.channel} Note${data1} Vel${data2}`;
                 if (linkedSampler) {
@@ -1072,7 +1204,7 @@
                     data2 = sampledValue;
                 }
                 
-                selectedOutput.send([statusByte, data1, data2]);
+                transmit([statusByte, data1, data2]);
                 messageName = `CC Ch${sampler.channel} CC${data1} Val${data2}`;
                 if (linkedSampler) {
                     console.log(`[MIDI OUT] Sampler ${sampler.id} (linked with ${linkedSampler.id}): ${messageName}`);
@@ -1082,7 +1214,7 @@
             } else if (sampler.type === 'program') {
                 statusByte = 0xC0 | channel;
                 data1 = sampledValue;
-                selectedOutput.send([statusByte, data1]);
+                transmit([statusByte, data1]);
                 messageName = `Prog Ch${sampler.channel} Prog${data1}`;
                 console.log(`[MIDI OUT] Sampler ${sampler.id}: ${messageName} (RGB: ${sampler.color.r},${sampler.color.g},${sampler.color.b})`);
             }
