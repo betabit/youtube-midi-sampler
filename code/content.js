@@ -249,11 +249,8 @@
         document.getElementById('midi-show-logger').addEventListener('change', (e) => {
             loggerVisible = e.target.checked;
             const loggerEl = document.getElementById('midi-logger');
-            console.log('Logger checkbox toggled:', loggerVisible);
-            console.log('Logger element:', loggerEl);
             if (loggerEl) {
                 loggerEl.style.display = loggerVisible ? 'block' : 'none';
-                console.log('Logger display set to:', loggerEl.style.display);
             }
             if (loggerVisible) {
                 updateLogger();
@@ -556,41 +553,56 @@
         }
 
         if (loggerVisible) {
+            prependLogEntry(midiLogger[0]);
+        }
+    }
+
+    function renderLogEntry(entry) {
+        const logEntry = document.createElement('div');
+        logEntry.className = 'midi-log-entry';
+        logEntry.innerHTML = `
+            <span class="midi-log-time">${entry.time}</span>
+            <span class="midi-log-sampler">S${entry.samplerId}:</span>
+            <span class="midi-log-message">${entry.message}</span>
+        `;
+        return logEntry;
+    }
+
+    function prependLogEntry(entry) {
+        const loggerEl = document.getElementById('midi-logger');
+        if (!loggerEl) return;
+
+        const header = loggerEl.querySelector('.midi-logger-header');
+        if (!header) {
             updateLogger();
+            return;
+        }
+        header.textContent = 'MIDI Log (most recent first)';
+
+        // Newest entry goes directly below the header
+        header.insertAdjacentElement('afterend', renderLogEntry(entry));
+
+        // Trim the DOM to maxLogEntries (+1 for the header)
+        while (loggerEl.children.length > maxLogEntries + 1) {
+            loggerEl.removeChild(loggerEl.lastElementChild);
         }
     }
 
     function updateLogger() {
         const loggerEl = document.getElementById('midi-logger');
-        console.log('updateLogger called, element:', loggerEl, 'visible:', loggerVisible, 'logs:', midiLogger.length);
-        if (!loggerEl) {
-            console.error('Logger element not found!');
-            return;
-        }
-        if (!loggerVisible) {
-            console.log('Logger not visible, skipping update');
-            return;
-        }
+        if (!loggerEl || !loggerVisible) return;
 
         if (midiLogger.length === 0) {
             loggerEl.innerHTML = '<div class="midi-logger-header">MIDI Log (waiting for messages...)</div>';
-            console.log('Logger updated with waiting message');
             return;
         }
 
         loggerEl.innerHTML = '<div class="midi-logger-header">MIDI Log (most recent first)</div>';
-        
+
+        // midiLogger is ordered newest-first, so append in array order
         midiLogger.forEach(entry => {
-            const logEntry = document.createElement('div');
-            logEntry.className = 'midi-log-entry';
-            logEntry.innerHTML = `
-                <span class="midi-log-time">${entry.time}</span>
-                <span class="midi-log-sampler">S${entry.samplerId}:</span>
-                <span class="midi-log-message">${entry.message}</span>
-            `;
-            loggerEl.appendChild(logEntry);
+            loggerEl.appendChild(renderLogEntry(entry));
         });
-        console.log('Logger updated with', midiLogger.length, 'entries');
     }
 
     function updateTimers() {
