@@ -84,6 +84,40 @@
     font-size: 18px !important;
 }
 
+#midi-help-btn {
+    background: rgba(255, 255, 255, 0.15) !important;
+    padding: 4px 10px !important;
+}
+
+#midi-help {
+    margin-bottom: 12px;
+    padding: 10px;
+    background: rgba(74, 158, 255, 0.08);
+    border: 1px solid rgba(74, 158, 255, 0.25);
+    border-radius: 6px;
+    font-size: 11px;
+    line-height: 1.5;
+    color: #ccc;
+}
+
+#midi-help strong {
+    color: #4a9eff;
+    font-size: 12px;
+}
+
+#midi-help p {
+    margin: 6px 0;
+}
+
+#midi-help ul {
+    margin: 6px 0 0;
+    padding-left: 16px;
+}
+
+#midi-help li {
+    margin-bottom: 4px;
+}
+
 .midi-panel-content {
     padding: 15px;
     flex: 1;

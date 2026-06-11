@@ -93,9 +93,20 @@
             <div class="midi-panel-header">
                 <h3>🎹 MIDI Sampler</h3>
                 <button id="midi-toggle-btn">▶ Start</button>
+                <button id="midi-help-btn" title="How sampler linking works">?</button>
                 <button id="midi-close-btn">×</button>
             </div>
             <div class="midi-panel-content">
+                <div id="midi-help" style="display: none;">
+                    <strong>How linking works</strong>
+                    <p>Linking combines two samplers into a single MIDI message. Set a sampler's <em>Link</em> dropdown to point at another sampler with the same Type and Channel.</p>
+                    <ul>
+                        <li>The linking sampler's <em>Target</em> picks what its color controls (e.g. →Note); the linked sampler supplies the other half (e.g. velocity).</li>
+                        <li>The combined message is sent by the linking sampler, at its polling rate.</li>
+                        <li>Badges show direction: blue ← means another sampler links to this one, orange → means this one links out. On the video overlay, a dashed arrow points from the linking sampler to its partner.</li>
+                        <li>Only need one box? The <em>→Note+Vel</em> target makes a single sampler drive both note and velocity without linking.</li>
+                    </ul>
+                </div>
                 <div class="midi-control-group">
                     <button id="midi-connect-btn">Connect MIDI</button>
                     <select id="midi-output-select">
@@ -209,6 +220,11 @@
                 btn.textContent = '▶ Start';
                 stopSampling();
             }
+        });
+
+        document.getElementById('midi-help-btn').addEventListener('click', () => {
+            const helpEl = document.getElementById('midi-help');
+            helpEl.style.display = helpEl.style.display === 'none' ? 'block' : 'none';
         });
 
         document.getElementById('midi-close-btn').addEventListener('click', () => {
