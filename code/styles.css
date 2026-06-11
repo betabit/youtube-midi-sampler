@@ -124,6 +124,27 @@
     overflow-y: auto;
 }
 
+.midi-section {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 10px;
+}
+
+.midi-section-title {
+    font-size: 10px;
+    font-weight: 600;
+    color: #4a9eff;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+}
+
+.midi-section .midi-control-group:last-child {
+    margin-bottom: 0;
+}
+
 .midi-control-group {
     display: flex;
     gap: 8px;
@@ -157,7 +178,7 @@
 }
 
 #midi-samplers-list {
-    margin: 15px 0;
+    margin-top: 4px;
 }
 
 .midi-sampler-item {

@@ -107,54 +107,69 @@
                         <li>Only need one box? The <em>→Note+Vel</em> target makes a single sampler drive both note and velocity without linking.</li>
                     </ul>
                 </div>
-                <div class="midi-control-group">
-                    <button id="midi-connect-btn">Connect MIDI</button>
-                    <select id="midi-output-select">
-                        <option value="">No MIDI devices</option>
-                    </select>
+                <div class="midi-section">
+                    <div class="midi-section-title">MIDI Connection</div>
+                    <div class="midi-control-group">
+                        <button id="midi-connect-btn">Connect MIDI</button>
+                        <select id="midi-output-select">
+                            <option value="">No MIDI devices</option>
+                        </select>
+                    </div>
                 </div>
-                <div class="midi-control-group">
-                    <label style="display: flex; align-items: center; gap: 5px; font-size: 12px;">
-                        <span>Global Channel:</span>
-                        <input type="number" id="global-midi-channel" min="1" max="16" value="1" title="Global MIDI Channel" style="width: 50px; padding: 6px 8px; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px; background: rgba(255, 255, 255, 0.1); color: #fff; font-size: 11px;">
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 3px; font-size: 12px;">
-                        <input type="checkbox" id="global-send-on-change">
-                        <span>Global Δ Only</span>
-                    </label>
+                <div class="midi-section">
+                    <div class="midi-section-title">Global Parameters</div>
+                    <div class="midi-control-group">
+                        <label style="display: flex; align-items: center; gap: 5px; font-size: 12px;">
+                            <span>Channel:</span>
+                            <input type="number" id="global-midi-channel" min="1" max="16" value="1" title="Global MIDI Channel" style="width: 50px; padding: 6px 8px; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px; background: rgba(255, 255, 255, 0.1); color: #fff; font-size: 11px;">
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 5px; font-size: 12px;">
+                            <span>Rate:</span>
+                            <input type="number" id="global-polling-interval" min="10" max="5000" step="10" value="50" placeholder="ms" title="Global Polling Interval (ms)" style="width: 70px; padding: 6px 8px; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px; background: rgba(255, 255, 255, 0.1); color: #fff; font-size: 11px;">
+                            <span style="font-size: 10px; color: #888;">ms</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 5px; font-size: 12px;">
+                            <span>Delta Threshold:</span>
+                            <input type="number" id="global-delta-threshold" min="0" max="127" step="1" value="1" placeholder="Δ" title="Global Delta Threshold (MIDI value change required)" style="width: 50px; padding: 6px 8px; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px; background: rgba(255, 255, 255, 0.1); color: #fff; font-size: 11px;">
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 3px; font-size: 12px;">
+                            <input type="checkbox" id="global-send-on-change">
+                            <span>Δ Only</span>
+                        </label>
+                    </div>
                 </div>
-                <div class="midi-control-group">
-                    <button id="midi-add-sampler-btn">+ Add Sampler</button>
-                    <label>
-                        <input type="checkbox" id="midi-show-overlay"> Show Overlay
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 5px; font-size: 12px;">
-                        <span>Global Rate:</span>
-                        <input type="number" id="global-polling-interval" min="10" max="5000" step="10" value="50" placeholder="ms" title="Global Polling Interval (ms)" style="width: 70px; padding: 6px 8px; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px; background: rgba(255, 255, 255, 0.1); color: #fff; font-size: 11px;">
-                        <span style="font-size: 10px; color: #888;">ms</span>
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 5px; font-size: 12px;">
-                        <span>Delta Threshold:</span>
-                        <input type="number" id="global-delta-threshold" min="0" max="127" step="1" value="1" placeholder="Δ" title="Global Delta Threshold (MIDI value change required)" style="width: 50px; padding: 6px 8px; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px; background: rgba(255, 255, 255, 0.1); color: #fff; font-size: 11px;">
-                    </label>
+                <div class="midi-section">
+                    <div class="midi-section-title">Presets</div>
+                    <div class="midi-control-group">
+                        <button id="save-preset-btn" title="Save current state as preset">Save Preset</button>
+                        <select id="preset-select" title="Load preset">
+                            <option value="">Select Preset...</option>
+                        </select>
+                        <button id="delete-preset-btn" title="Delete selected preset">Delete</button>
+                    </div>
                 </div>
-                <div class="midi-control-group">
-                    <button id="save-preset-btn" title="Save current state as preset">Save Preset</button>
-                    <select id="preset-select" title="Load preset">
-                        <option value="">Select Preset...</option>
-                    </select>
-                    <button id="delete-preset-btn" title="Delete selected preset">Delete</button>
+                <div class="midi-section">
+                    <div class="midi-section-title">Samplers</div>
+                    <div class="midi-control-group">
+                        <button id="midi-add-sampler-btn">+ Add Sampler</button>
+                        <label>
+                            <input type="checkbox" id="midi-show-overlay"> Show Overlay
+                        </label>
+                    </div>
+                    <div id="midi-samplers-list"></div>
                 </div>
-                <div id="midi-samplers-list"></div>
+                <div class="midi-section">
+                    <div class="midi-section-title">Logging</div>
+                    <div class="midi-control-group">
+                        <label>
+                            <input type="checkbox" id="midi-show-logger"> Show MIDI Logger
+                        </label>
+                    </div>
+                    <div id="midi-logger" style="display: none;"></div>
+                </div>
                 <div class="midi-status" id="midi-status">
                     Click "Connect MIDI" to begin
                 </div>
-                <div class="midi-control-group">
-                    <label>
-                        <input type="checkbox" id="midi-show-logger"> Show MIDI Logger
-                    </label>
-                </div>
-                <div id="midi-logger" style="display: none;"></div>
             </div>
         `;
         document.body.appendChild(panel);
