@@ -31,6 +31,9 @@
 
     // Note names for display
     const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+    // Selectable octaves for quantization range (C-1 = note 0, B9 = note 131 clamped to 127)
+    const octaveChoices = [-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
     
     function getNoteNameWithOctave(midiNote) {
         const octave = Math.floor(midiNote / 12) - 1;
@@ -341,7 +344,9 @@
                 scaleRootNote: 'C', // Note name
                 scaleRootOctave: 4, // Octave number
                 scaleType: 'major',
-                noteRange: { min: 0, max: 127 }
+                noteRange: { min: 0, max: 127 },
+                octaveMin: -1, // Octave range for quantization (C-1..C9 = full MIDI range)
+                octaveMax: 9
             };
         }
     }
@@ -721,6 +726,16 @@
         };
     }
 
+    function applyOctaveRange(sampler) {
+        let minOct = sampler.octaveMin !== undefined ? sampler.octaveMin : -1;
+        let maxOct = sampler.octaveMax !== undefined ? sampler.octaveMax : 9;
+        if (minOct > maxOct) {
+            [minOct, maxOct] = [maxOct, minOct];
+        }
+        sampler.noteRange.min = Math.max(0, (minOct + 1) * 12);
+        sampler.noteRange.max = Math.min(127, (maxOct + 1) * 12 + 11);
+    }
+
     function quantizeToScale(noteValue, rootNote, scaleType, minNote, maxNote) {
         // Constrain to range first
         noteValue = Math.max(minNote, Math.min(maxNote, noteValue));
@@ -1073,13 +1088,21 @@
                             ).join('')}
                         </select>
                         </label>
-                        <label class="midi-field" title="Lowest allowed note">
-                        <span class="midi-field-label">Min</span>
-                        <input type="number" name="sampler-${s.id}-noteRangeMin" min="0" max="127" value="${s.noteRange.min}" data-id="${s.id}" data-prop="noteRangeMin" style="width: 50px;">
+                        <label class="midi-field" title="Lowest octave for quantized notes">
+                        <span class="midi-field-label">Min Oct</span>
+                        <select name="sampler-${s.id}-octaveMin" data-id="${s.id}" data-prop="octaveMin" style="width: 55px;">
+                            ${octaveChoices.map(oct =>
+                                `<option value="${oct}" ${(s.octaveMin !== undefined ? s.octaveMin : -1) === oct ? 'selected' : ''}>C${oct}</option>`
+                            ).join('')}
+                        </select>
                         </label>
-                        <label class="midi-field" title="Highest allowed note">
-                        <span class="midi-field-label">Max</span>
-                        <input type="number" name="sampler-${s.id}-noteRangeMax" min="0" max="127" value="${s.noteRange.max}" data-id="${s.id}" data-prop="noteRangeMax" style="width: 50px;">
+                        <label class="midi-field" title="Highest octave for quantized notes">
+                        <span class="midi-field-label">Max Oct</span>
+                        <select name="sampler-${s.id}-octaveMax" data-id="${s.id}" data-prop="octaveMax" style="width: 55px;">
+                            ${octaveChoices.map(oct =>
+                                `<option value="${oct}" ${(s.octaveMax !== undefined ? s.octaveMax : 9) === oct ? 'selected' : ''}>B${oct}</option>`
+                            ).join('')}
+                        </select>
                         </label>
                     </div>
                     ` : ''}
@@ -1118,10 +1141,9 @@
                         if (prop === 'quantizeToScale' || prop === 'sendNoteOff') {
                             updateSamplersList(); // Refresh to show/hide controls
                         }
-                    } else if (prop === 'noteRangeMin') {
-                        sampler.noteRange.min = parseInt(e.target.value);
-                    } else if (prop === 'noteRangeMax') {
-                        sampler.noteRange.max = parseInt(e.target.value);
+                    } else if (prop === 'octaveMin' || prop === 'octaveMax') {
+                        sampler[prop] = parseInt(e.target.value);
+                        applyOctaveRange(sampler);
                     } else if (prop === 'scaleRootNote') {
                         sampler.scaleRootNote = e.target.value;
                         sampler.scaleRoot = midiNoteFromName(sampler.scaleRootNote, sampler.scaleRootOctave);
