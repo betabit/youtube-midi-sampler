@@ -256,6 +256,7 @@
                             <li><em>● Record</em> – captures every MIDI message sent to the output (notes, note-offs, CCs) with timing, until stopped. Starting a new recording replaces the unsaved one.</li>
                             <li><em>▶ Play</em> – replays the current recording to the selected output with original timing. Stopping mid-take sends All Notes Off. Playback is not shown in the logger.</li>
                             <li><em>Save Recording</em> – stores the current take under a name (kept in this browser's local storage). <em>Select Recording</em> loads one; <em>Delete</em> removes it.</li>
+                            <li><em>Edit Events</em> – shows the take as an editable list: change times (ms) and data values, or delete events. Time edits take effect (and re-order) on play.</li>
                         </ul>
                         Tip: enable Δ Only on samplers to keep recordings compact.
                     </div>
@@ -271,6 +272,12 @@
                         </select>
                         <button id="delete-recording-btn" title="Delete selected recording">Delete</button>
                     </div>
+                    <div class="midi-control-group">
+                        <label>
+                            <input type="checkbox" id="midi-show-events"> Edit Events
+                        </label>
+                    </div>
+                    <div id="midi-event-list" style="display: none;"></div>
                 </div>
                 <div class="midi-section">
                     <div class="midi-section-title">
@@ -488,6 +495,14 @@
         document.getElementById('save-preset-btn').addEventListener('click', savePreset);
         document.getElementById('preset-select').addEventListener('change', loadPreset);
         document.getElementById('delete-preset-btn').addEventListener('click', deletePreset);
+
+        document.getElementById('midi-show-events').addEventListener('change', (e) => {
+            const listEl = document.getElementById('midi-event-list');
+            listEl.style.display = e.target.checked ? 'block' : 'none';
+            if (e.target.checked) {
+                updateEventList();
+            }
+        });
 
         document.getElementById('save-recording-btn').addEventListener('click', saveRecording);
         document.getElementById('recording-select').addEventListener('change', loadRecording);
@@ -865,6 +880,78 @@
         document.getElementById('midi-logger-popout-btn').textContent = '⇱ Pop Out';
     }
 
+    function describeEvent(bytes) {
+        const status = bytes[0] & 0xF0;
+        const ch = (bytes[0] & 0x0F) + 1;
+        switch (status) {
+            case 0x90: return `Note On Ch${ch}`;
+            case 0x80: return `Note Off Ch${ch}`;
+            case 0xB0: return `CC Ch${ch}`;
+            case 0xC0: return `Prog Ch${ch}`;
+            default: return `0x${bytes[0].toString(16)} Ch${ch}`;
+        }
+    }
+
+    function updateEventList() {
+        const listEl = document.getElementById('midi-event-list');
+        if (!listEl || listEl.style.display === 'none') return;
+
+        if (recordedEvents.length === 0) {
+            listEl.innerHTML = '<div class="midi-event-empty">No events recorded</div>';
+            return;
+        }
+
+        const maxEventRows = 1000;
+        listEl.innerHTML = '';
+        const shown = Math.min(recordedEvents.length, maxEventRows);
+        for (let i = 0; i < shown; i++) {
+            const ev = recordedEvents[i];
+            const row = document.createElement('div');
+            row.className = 'midi-event-row';
+            row.innerHTML = `
+                <input type="number" min="0" step="10" value="${ev.t}" data-idx="${i}" data-field="t" title="Time (ms)">
+                <span class="midi-event-desc">${describeEvent(ev.bytes)}</span>
+                <input type="number" min="0" max="127" value="${ev.bytes[1]}" data-idx="${i}" data-field="d1" title="Data 1 (note/CC number)">
+                ${ev.bytes.length > 2 ? `<input type="number" min="0" max="127" value="${ev.bytes[2]}" data-idx="${i}" data-field="d2" title="Data 2 (velocity/value)">` : ''}
+                <button class="midi-event-delete" data-idx="${i}" title="Delete event">×</button>
+            `;
+            listEl.appendChild(row);
+        }
+        if (recordedEvents.length > maxEventRows) {
+            const note = document.createElement('div');
+            note.className = 'midi-event-empty';
+            note.textContent = `Showing first ${maxEventRows} of ${recordedEvents.length} events`;
+            listEl.appendChild(note);
+        }
+
+        listEl.querySelectorAll('input').forEach(inp => {
+            inp.addEventListener('change', (e) => {
+                const idx = parseInt(e.target.dataset.idx);
+                const field = e.target.dataset.field;
+                const value = parseInt(e.target.value) || 0;
+                const ev = recordedEvents[idx];
+                if (!ev) return;
+                if (field === 't') {
+                    ev.t = Math.max(0, value);
+                } else if (field === 'd1') {
+                    ev.bytes[1] = Math.min(127, Math.max(0, value));
+                } else if (field === 'd2') {
+                    ev.bytes[2] = Math.min(127, Math.max(0, value));
+                }
+                updateRecordStatus();
+            });
+        });
+
+        listEl.querySelectorAll('.midi-event-delete').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const idx = parseInt(e.target.dataset.idx);
+                recordedEvents.splice(idx, 1);
+                updateRecordStatus();
+                updateEventList();
+            });
+        });
+    }
+
     function updateRecordStatus() {
         const el = document.getElementById('midi-record-status');
         if (!el) return;
@@ -894,6 +981,7 @@
         btn.textContent = '● Record';
         btn.classList.remove('recording');
         updateRecordStatus();
+        updateEventList();
         updateStatus(`Recorded ${recordedEvents.length} events`);
     }
 
@@ -970,6 +1058,7 @@
 
         recordedEvents = recordings[name].events.map(ev => ({ t: ev.t, bytes: [...ev.bytes] }));
         updateRecordStatus();
+        updateEventList();
         updateStatus(`Recording "${name}" loaded`);
     }
 
