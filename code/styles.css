@@ -169,8 +169,35 @@
 .midi-sampler-controls {
     display: flex;
     gap: 6px;
-    align-items: center;
+    align-items: flex-end;
     flex-wrap: wrap;
+}
+
+.midi-field {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+}
+
+.midi-field-label {
+    font-size: 9px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+}
+
+.midi-field input[type="checkbox"] {
+    width: auto;
+    min-width: 0;
+    padding: 0;
+    margin: 4px 0 6px;
+}
+
+.midi-field .midi-timer,
+.midi-field .midi-value {
+    padding: 6px 0;
 }
 
 .midi-sampler-controls select,
