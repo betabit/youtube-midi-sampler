@@ -19,6 +19,7 @@
     let midiLogger = [];
     let maxLogEntries = 20;
     let loggerVisible = false;
+    let loggerWindow = null; // Floating window when the logger is popped out
     let timerInterval = null;
     let globalPollingInterval = 50; // Global default polling rate
     let globalDeltaThreshold = 1; // Global delta threshold for "send on change"
@@ -245,14 +246,18 @@
                     <div class="midi-help-box" id="midi-help-logging" style="display: none;">
                         <ul>
                             <li><em>Show MIDI Logger</em> – displays the last 20 messages sent (newest first), including note-offs and system events. Requires a selected MIDI output.</li>
+                            <li><em>Pop Out</em> – moves the log into its own moveable, resizable window; pop it back in from either button.</li>
                         </ul>
                     </div>
                     <div class="midi-control-group">
                         <label>
                             <input type="checkbox" id="midi-show-logger"> Show MIDI Logger
                         </label>
+                        <button id="midi-logger-popout-btn" title="Open the log in its own moveable window">⇱ Pop Out</button>
                     </div>
-                    <div id="midi-logger" style="display: none;"></div>
+                    <div id="midi-logger-home">
+                        <div id="midi-logger" style="display: none;"></div>
+                    </div>
                 </div>
                 <div class="midi-status" id="midi-status">
                     Click "Connect MIDI" to begin
@@ -385,11 +390,22 @@
         document.getElementById('midi-show-logger').addEventListener('change', (e) => {
             loggerVisible = e.target.checked;
             const loggerEl = document.getElementById('midi-logger');
-            if (loggerEl) {
+            if (loggerWindow) {
+                // Popped out: the checkbox shows/hides the whole window
+                loggerWindow.style.display = loggerVisible ? 'flex' : 'none';
+            } else if (loggerEl) {
                 loggerEl.style.display = loggerVisible ? 'block' : 'none';
             }
             if (loggerVisible) {
                 updateLogger();
+            }
+        });
+
+        document.getElementById('midi-logger-popout-btn').addEventListener('click', () => {
+            if (loggerWindow) {
+                popInLogger();
+            } else {
+                popOutLogger();
             }
         });
 
@@ -745,6 +761,42 @@
         midiLogger.forEach(entry => {
             loggerEl.appendChild(renderLogEntry(entry));
         });
+    }
+
+    function popOutLogger() {
+        loggerWindow = document.createElement('div');
+        loggerWindow.id = 'midi-logger-window';
+        loggerWindow.innerHTML = `
+            <div class="midi-logger-window-header">
+                <span>🎹 MIDI Log</span>
+                <button id="midi-logger-popin-btn" title="Return the log to the panel">⇲</button>
+            </div>
+        `;
+        document.body.appendChild(loggerWindow);
+
+        // Move the live logger element into the window; logging keeps
+        // working because everything looks it up by id
+        const loggerEl = document.getElementById('midi-logger');
+        loggerWindow.appendChild(loggerEl);
+        loggerEl.style.display = 'block';
+
+        loggerVisible = true;
+        document.getElementById('midi-show-logger').checked = true;
+        document.getElementById('midi-logger-popout-btn').textContent = '⇲ Pop In';
+        updateLogger();
+
+        makeDraggable(loggerWindow, loggerWindow.querySelector('.midi-logger-window-header'));
+        document.getElementById('midi-logger-popin-btn').addEventListener('click', popInLogger);
+    }
+
+    function popInLogger() {
+        if (!loggerWindow) return;
+        const loggerEl = document.getElementById('midi-logger');
+        document.getElementById('midi-logger-home').appendChild(loggerEl);
+        loggerEl.style.display = loggerVisible ? 'block' : 'none';
+        loggerWindow.remove();
+        loggerWindow = null;
+        document.getElementById('midi-logger-popout-btn').textContent = '⇱ Pop Out';
     }
 
     function updateTimers() {
