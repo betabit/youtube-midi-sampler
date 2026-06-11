@@ -784,7 +784,7 @@
         let sampledValue = sampler.midiValue;
         
         // Apply quantization if enabled and controlling note
-        if (sampler.quantizeToScale && (sampler.controlTarget === 'note' || sampler.controlTarget === 'value')) {
+        if (sampler.quantizeToScale && (sampler.controlTarget === 'note' || sampler.controlTarget === 'value' || sampler.controlTarget === 'both')) {
             sampledValue = quantizeToScale(
                 sampledValue,
                 sampler.scaleRoot,
@@ -814,7 +814,11 @@
                 // Check if this sampler is linked to another
                 const linkedSampler = sampler.linkedSamplerId ? samplers.find(s => s.id === sampler.linkedSamplerId) : null;
                 
-                if (linkedSampler) {
+                if (sampler.controlTarget === 'both') {
+                    // One sampler drives both: note from the (quantized) value, velocity from the raw value
+                    data1 = sampledValue;
+                    data2 = sampler.midiValue;
+                } else if (linkedSampler) {
                     // Use linked sampler for the complementary value
                     if (sampler.controlTarget === 'note') {
                         data1 = sampledValue; // This sampler controls note (quantized if enabled)
@@ -1003,6 +1007,7 @@
                             ${s.type === 'note' ? `
                                 <option value="velocity" ${s.controlTarget === 'velocity' ? 'selected' : ''}>→Velocity</option>
                                 <option value="note" ${s.controlTarget === 'note' ? 'selected' : ''}>→Note</option>
+                                <option value="both" ${s.controlTarget === 'both' ? 'selected' : ''}>→Note+Vel</option>
                             ` : ''}
                             ${s.type === 'cc' ? `
                                 <option value="value" ${s.controlTarget === 'value' ? 'selected' : ''}>→Value</option>
@@ -1054,7 +1059,7 @@
                         <span class="midi-value" data-value-id="${s.id}">${s.midiValue}</span>
                     </div>
                 </div>
-                ${(s.controlTarget === 'note' || s.type === 'program') ? `
+                ${(s.controlTarget === 'note' || s.controlTarget === 'both' || s.type === 'program') ? `
                 <div class="midi-scale-controls">
                     <label style="display: flex; align-items: center; gap: 5px; margin-bottom: 5px;">
                         <input type="checkbox" data-id="${s.id}" data-prop="quantizeToScale" ${s.quantizeToScale ? 'checked' : ''}>
