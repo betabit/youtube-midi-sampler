@@ -124,6 +124,75 @@
     overflow-y: auto;
 }
 
+.midi-section {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 10px;
+}
+
+.midi-section-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 10px;
+    font-weight: 600;
+    color: #4a9eff;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+}
+
+.midi-section-help-btn {
+    background: rgba(255, 255, 255, 0.12);
+    border: none;
+    border-radius: 50%;
+    color: #aaa;
+    width: 16px;
+    height: 16px;
+    font-size: 10px;
+    line-height: 16px;
+    text-align: center;
+    padding: 0;
+    cursor: pointer;
+}
+
+.midi-section-help-btn:hover {
+    background: rgba(74, 158, 255, 0.4);
+    color: #fff;
+}
+
+.midi-help-box {
+    margin-bottom: 10px;
+    padding: 8px 10px;
+    background: rgba(74, 158, 255, 0.08);
+    border: 1px solid rgba(74, 158, 255, 0.25);
+    border-radius: 6px;
+    font-size: 11px;
+    line-height: 1.5;
+    color: #ccc;
+}
+
+.midi-help-box ul {
+    margin: 4px 0 0;
+    padding-left: 14px;
+}
+
+.midi-help-box li {
+    margin-bottom: 3px;
+}
+
+.midi-help-box em {
+    color: #4a9eff;
+    font-style: normal;
+    font-weight: 600;
+}
+
+.midi-section .midi-control-group:last-child {
+    margin-bottom: 0;
+}
+
 .midi-control-group {
     display: flex;
     gap: 8px;
@@ -157,7 +226,7 @@
 }
 
 #midi-samplers-list {
-    margin: 15px 0;
+    margin-top: 4px;
 }
 
 .midi-sampler-item {
