@@ -46,6 +46,10 @@
         return (octave + 1) * 12 + noteIndex;
     }
 
+    function escapeAttr(str) {
+        return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    }
+
     // Musical scales (semitones from root)
     const scales = {
         'chromatic': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
@@ -318,8 +322,10 @@
             dragTarget.isResizing = false;
         } else {
             isDrawing = true;
+            const newId = nextSamplerId++;
             currentSampler = {
-                id: nextSamplerId++,
+                id: newId,
+                name: 'Sampler ' + newId,
                 x: x,
                 y: y,
                 width: 0,
@@ -482,11 +488,13 @@
             overlayCtx.fillStyle = 'rgba(74, 158, 255, 0.15)';
             overlayCtx.fillRect(s.x, s.y, s.width, s.height);
 
-            overlayCtx.fillStyle = '#4a9eff';
-            overlayCtx.fillRect(s.x, s.y - 20, 80, 20);
-            overlayCtx.fillStyle = '#fff';
+            const label = s.name || `Sampler ${s.id}`;
             overlayCtx.font = '12px sans-serif';
-            overlayCtx.fillText(`Sampler ${s.id}`, s.x + 5, s.y - 6);
+            const labelWidth = overlayCtx.measureText(label).width + 10;
+            overlayCtx.fillStyle = '#4a9eff';
+            overlayCtx.fillRect(s.x, s.y - 20, labelWidth, 20);
+            overlayCtx.fillStyle = '#fff';
+            overlayCtx.fillText(label, s.x + 5, s.y - 6);
         });
 
         if (currentSampler && isDrawing) {
@@ -975,7 +983,7 @@
             
             div.innerHTML = `
                 <div class="midi-sampler-header">
-                    <strong>Sampler ${s.id}</strong>
+                    <input type="text" class="midi-sampler-name" name="sampler-${s.id}-name" value="${escapeAttr(s.name || 'Sampler ' + s.id)}" data-id="${s.id}" data-prop="name" title="Click to rename this sampler">
                     ${linkedFrom.length > 0 ? `<span class="midi-link-badge" title="Linked from Sampler(s): ${linkedFrom.map(l => l.id).join(', ')}">← ${linkedFrom.map(l => 'S' + l.id).join(', ')}</span>` : ''}
                     ${isLinkedTo ? `<span class="midi-link-badge midi-link-badge-out" title="Linked to Sampler ${s.linkedSamplerId}">→ S${s.linkedSamplerId}</span>` : ''}
                     <button class="midi-delete-btn" data-id="${s.id}">×</button>
@@ -1159,6 +1167,9 @@
                     }
                     if (prop === 'type' || prop === 'controlTarget') {
                         updateSamplersList();
+                    }
+                    if (prop === 'name') {
+                        drawSamplers(); // refresh the canvas label
                     }
                 }
             });

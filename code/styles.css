@@ -142,9 +142,21 @@
     flex-wrap: wrap;
 }
 
-.midi-sampler-header strong {
-    font-size: 13px;
+.midi-sampler-name {
+    background: transparent;
+    border: none;
+    border-bottom: 1px dashed transparent;
     color: #4a9eff;
+    font-size: 13px;
+    font-weight: 600;
+    width: 130px;
+    padding: 2px 0;
+}
+
+.midi-sampler-name:hover,
+.midi-sampler-name:focus {
+    border-bottom-color: rgba(74, 158, 255, 0.5);
+    outline: none;
 }
 
 .midi-link-badge {
