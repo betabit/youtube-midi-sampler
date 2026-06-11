@@ -31,6 +31,9 @@
 
     // Note names for display
     const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+    // Selectable octaves for quantization range (C-1 = note 0, B9 = note 131 clamped to 127)
+    const octaveChoices = [-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
     
     function getNoteNameWithOctave(midiNote) {
         const octave = Math.floor(midiNote / 12) - 1;
@@ -41,6 +44,10 @@
     function midiNoteFromName(noteName, octave) {
         const noteIndex = noteNames.indexOf(noteName);
         return (octave + 1) * 12 + noteIndex;
+    }
+
+    function escapeAttr(str) {
+        return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
     }
 
     // Musical scales (semitones from root)
@@ -86,9 +93,20 @@
             <div class="midi-panel-header">
                 <h3>🎹 MIDI Sampler</h3>
                 <button id="midi-toggle-btn">▶ Start</button>
+                <button id="midi-help-btn" title="How sampler linking works">?</button>
                 <button id="midi-close-btn">×</button>
             </div>
             <div class="midi-panel-content">
+                <div id="midi-help" style="display: none;">
+                    <strong>How linking works</strong>
+                    <p>Linking combines two samplers into a single MIDI message. Set a sampler's <em>Link</em> dropdown to point at another sampler with the same Type and Channel.</p>
+                    <ul>
+                        <li>The linking sampler's <em>Target</em> picks what its color controls (e.g. →Note); the linked sampler supplies the other half (e.g. velocity).</li>
+                        <li>The combined message is sent by the linking sampler, at its polling rate.</li>
+                        <li>Badges show direction: blue ← means another sampler links to this one, orange → means this one links out. On the video overlay, a dashed arrow points from the linking sampler to its partner.</li>
+                        <li>Only need one box? The <em>→Note+Vel</em> target makes a single sampler drive both note and velocity without linking.</li>
+                    </ul>
+                </div>
                 <div class="midi-control-group">
                     <button id="midi-connect-btn">Connect MIDI</button>
                     <select id="midi-output-select">
@@ -185,7 +203,8 @@
     function setupEventListeners() {
         toggleBtn.addEventListener('click', () => {
             const isVisible = panel.style.display !== 'none';
-            panel.style.display = isVisible ? 'none' : 'block';
+            // 'flex' keeps the header/content column layout that resizing relies on
+            panel.style.display = isVisible ? 'none' : 'flex';
             if (!isVisible) {
                 updateCanvasSize();
             }
@@ -201,6 +220,11 @@
                 btn.textContent = '▶ Start';
                 stopSampling();
             }
+        });
+
+        document.getElementById('midi-help-btn').addEventListener('click', () => {
+            const helpEl = document.getElementById('midi-help');
+            helpEl.style.display = helpEl.style.display === 'none' ? 'block' : 'none';
         });
 
         document.getElementById('midi-close-btn').addEventListener('click', () => {
@@ -249,11 +273,8 @@
         document.getElementById('midi-show-logger').addEventListener('change', (e) => {
             loggerVisible = e.target.checked;
             const loggerEl = document.getElementById('midi-logger');
-            console.log('Logger checkbox toggled:', loggerVisible);
-            console.log('Logger element:', loggerEl);
             if (loggerEl) {
                 loggerEl.style.display = loggerVisible ? 'block' : 'none';
-                console.log('Logger display set to:', loggerEl.style.display);
             }
             if (loggerVisible) {
                 updateLogger();
@@ -317,8 +338,10 @@
             dragTarget.isResizing = false;
         } else {
             isDrawing = true;
+            const newId = nextSamplerId++;
             currentSampler = {
-                id: nextSamplerId++,
+                id: newId,
+                name: 'Sampler ' + newId,
                 x: x,
                 y: y,
                 width: 0,
@@ -344,7 +367,9 @@
                 scaleRootNote: 'C', // Note name
                 scaleRootOctave: 4, // Octave number
                 scaleType: 'major',
-                noteRange: { min: 0, max: 127 }
+                noteRange: { min: 0, max: 127 },
+                octaveMin: -1, // Octave range for quantization (C-1..C9 = full MIDI range)
+                octaveMax: 9
             };
         }
     }
@@ -479,11 +504,13 @@
             overlayCtx.fillStyle = 'rgba(74, 158, 255, 0.15)';
             overlayCtx.fillRect(s.x, s.y, s.width, s.height);
 
-            overlayCtx.fillStyle = '#4a9eff';
-            overlayCtx.fillRect(s.x, s.y - 20, 80, 20);
-            overlayCtx.fillStyle = '#fff';
+            const label = s.name || `Sampler ${s.id}`;
             overlayCtx.font = '12px sans-serif';
-            overlayCtx.fillText(`Sampler ${s.id}`, s.x + 5, s.y - 6);
+            const labelWidth = overlayCtx.measureText(label).width + 10;
+            overlayCtx.fillStyle = '#4a9eff';
+            overlayCtx.fillRect(s.x, s.y - 20, labelWidth, 20);
+            overlayCtx.fillStyle = '#fff';
+            overlayCtx.fillText(label, s.x + 5, s.y - 6);
         });
 
         if (currentSampler && isDrawing) {
@@ -556,41 +583,56 @@
         }
 
         if (loggerVisible) {
+            prependLogEntry(midiLogger[0]);
+        }
+    }
+
+    function renderLogEntry(entry) {
+        const logEntry = document.createElement('div');
+        logEntry.className = 'midi-log-entry';
+        logEntry.innerHTML = `
+            <span class="midi-log-time">${entry.time}</span>
+            <span class="midi-log-sampler">S${entry.samplerId}:</span>
+            <span class="midi-log-message">${entry.message}</span>
+        `;
+        return logEntry;
+    }
+
+    function prependLogEntry(entry) {
+        const loggerEl = document.getElementById('midi-logger');
+        if (!loggerEl) return;
+
+        const header = loggerEl.querySelector('.midi-logger-header');
+        if (!header) {
             updateLogger();
+            return;
+        }
+        header.textContent = 'MIDI Log (most recent first)';
+
+        // Newest entry goes directly below the header
+        header.insertAdjacentElement('afterend', renderLogEntry(entry));
+
+        // Trim the DOM to maxLogEntries (+1 for the header)
+        while (loggerEl.children.length > maxLogEntries + 1) {
+            loggerEl.removeChild(loggerEl.lastElementChild);
         }
     }
 
     function updateLogger() {
         const loggerEl = document.getElementById('midi-logger');
-        console.log('updateLogger called, element:', loggerEl, 'visible:', loggerVisible, 'logs:', midiLogger.length);
-        if (!loggerEl) {
-            console.error('Logger element not found!');
-            return;
-        }
-        if (!loggerVisible) {
-            console.log('Logger not visible, skipping update');
-            return;
-        }
+        if (!loggerEl || !loggerVisible) return;
 
         if (midiLogger.length === 0) {
             loggerEl.innerHTML = '<div class="midi-logger-header">MIDI Log (waiting for messages...)</div>';
-            console.log('Logger updated with waiting message');
             return;
         }
 
         loggerEl.innerHTML = '<div class="midi-logger-header">MIDI Log (most recent first)</div>';
-        
+
+        // midiLogger is ordered newest-first, so append in array order
         midiLogger.forEach(entry => {
-            const logEntry = document.createElement('div');
-            logEntry.className = 'midi-log-entry';
-            logEntry.innerHTML = `
-                <span class="midi-log-time">${entry.time}</span>
-                <span class="midi-log-sampler">S${entry.samplerId}:</span>
-                <span class="midi-log-message">${entry.message}</span>
-            `;
-            loggerEl.appendChild(logEntry);
+            loggerEl.appendChild(renderLogEntry(entry));
         });
-        console.log('Logger updated with', midiLogger.length, 'entries');
     }
 
     function updateTimers() {
@@ -709,6 +751,16 @@
         };
     }
 
+    function applyOctaveRange(sampler) {
+        let minOct = sampler.octaveMin !== undefined ? sampler.octaveMin : -1;
+        let maxOct = sampler.octaveMax !== undefined ? sampler.octaveMax : 9;
+        if (minOct > maxOct) {
+            [minOct, maxOct] = [maxOct, minOct];
+        }
+        sampler.noteRange.min = Math.max(0, (minOct + 1) * 12);
+        sampler.noteRange.max = Math.min(127, (maxOct + 1) * 12 + 11);
+    }
+
     function quantizeToScale(noteValue, rootNote, scaleType, minNote, maxNote) {
         // Constrain to range first
         noteValue = Math.max(minNote, Math.min(maxNote, noteValue));
@@ -748,7 +800,7 @@
         let sampledValue = sampler.midiValue;
         
         // Apply quantization if enabled and controlling note
-        if (sampler.quantizeToScale && (sampler.controlTarget === 'note' || sampler.controlTarget === 'value')) {
+        if (sampler.quantizeToScale && (sampler.controlTarget === 'note' || sampler.controlTarget === 'value' || sampler.controlTarget === 'both')) {
             sampledValue = quantizeToScale(
                 sampledValue,
                 sampler.scaleRoot,
@@ -778,7 +830,11 @@
                 // Check if this sampler is linked to another
                 const linkedSampler = sampler.linkedSamplerId ? samplers.find(s => s.id === sampler.linkedSamplerId) : null;
                 
-                if (linkedSampler) {
+                if (sampler.controlTarget === 'both') {
+                    // One sampler drives both: note from the (quantized) value, velocity from the raw value
+                    data1 = sampledValue;
+                    data2 = sampler.midiValue;
+                } else if (linkedSampler) {
                     // Use linked sampler for the complementary value
                     if (sampler.controlTarget === 'note') {
                         data1 = sampledValue; // This sampler controls note (quantized if enabled)
@@ -947,54 +1003,89 @@
             
             div.innerHTML = `
                 <div class="midi-sampler-header">
-                    <strong>Sampler ${s.id}</strong>
+                    <input type="text" class="midi-sampler-name" name="sampler-${s.id}-name" value="${escapeAttr(s.name || 'Sampler ' + s.id)}" data-id="${s.id}" data-prop="name" title="Click to rename this sampler">
                     ${linkedFrom.length > 0 ? `<span class="midi-link-badge" title="Linked from Sampler(s): ${linkedFrom.map(l => l.id).join(', ')}">← ${linkedFrom.map(l => 'S' + l.id).join(', ')}</span>` : ''}
                     ${isLinkedTo ? `<span class="midi-link-badge midi-link-badge-out" title="Linked to Sampler ${s.linkedSamplerId}">→ S${s.linkedSamplerId}</span>` : ''}
                     <button class="midi-delete-btn" data-id="${s.id}">×</button>
                 </div>
                 <div class="midi-sampler-controls">
-                    <select data-id="${s.id}" data-prop="type">
-                        <option value="note" ${s.type === 'note' ? 'selected' : ''}>Note</option>
-                        <option value="cc" ${s.type === 'cc' ? 'selected' : ''}>CC</option>
-                        <option value="program" ${s.type === 'program' ? 'selected' : ''}>Program</option>
-                    </select>
-                    <select data-id="${s.id}" data-prop="controlTarget" title="What does the sampled value control?">
-                        ${s.type === 'note' ? `
-                            <option value="velocity" ${s.controlTarget === 'velocity' ? 'selected' : ''}>→Velocity</option>
-                            <option value="note" ${s.controlTarget === 'note' ? 'selected' : ''}>→Note</option>
-                        ` : ''}
-                        ${s.type === 'cc' ? `
-                            <option value="value" ${s.controlTarget === 'value' ? 'selected' : ''}>→Value</option>
-                            <option value="cc" ${s.controlTarget === 'cc' ? 'selected' : ''}>→CC#</option>
-                        ` : ''}
-                    </select>
-                    <select data-id="${s.id}" data-prop="linkedSamplerId" title="Link to another sampler">
-                        <option value="">No Link</option>
-                        ${samplers.filter(other => other.id !== s.id && other.type === s.type && other.channel === s.channel).map(other => 
-                            `<option value="${other.id}" ${s.linkedSamplerId === other.id ? 'selected' : ''}>Link→S${other.id}</option>`
-                        ).join('')}
-                    </select>
-                    <label style="display: flex; align-items: center; gap: 3px; font-size: 10px;" title="Only send MIDI when value changes">
-                        <input type="checkbox" data-id="${s.id}" data-prop="sendOnChangeOnly" ${s.sendOnChangeOnly ? 'checked' : ''}>
-                        <span>Δ Only</span>
+                    <label class="midi-field" title="MIDI message type">
+                        <span class="midi-field-label">Type</span>
+                        <select name="sampler-${s.id}-type" data-id="${s.id}" data-prop="type">
+                            <option value="note" ${s.type === 'note' ? 'selected' : ''}>Note</option>
+                            <option value="cc" ${s.type === 'cc' ? 'selected' : ''}>CC</option>
+                            <option value="program" ${s.type === 'program' ? 'selected' : ''}>Program</option>
+                        </select>
                     </label>
-                    <input type="number" min="1" max="16" value="${s.channel}" data-id="${s.id}" data-prop="channel" placeholder="Ch" title="Channel">
-                    ${s.type === 'note' ? `<input type="number" min="0" max="127" value="${s.noteNumber}" data-id="${s.id}" data-prop="noteNumber" placeholder="Note" title="Note Number">` : ''}
-                    ${s.type === 'cc' ? `<input type="number" min="0" max="127" value="${s.ccNumber}" data-id="${s.id}" data-prop="ccNumber" placeholder="CC" title="CC Number">` : ''}
-                    <input type="number" min="10" max="5000" step="10" value="${s.pollingInterval}" data-id="${s.id}" data-prop="pollingInterval" placeholder="ms" title="Polling Interval (ms)" style="width: 70px;">
-                    <span class="midi-timer" data-timer-id="${s.id}" title="Time until next sample">${s.displayTimeRemaining !== undefined ? s.displayTimeRemaining + 'ms' : '—'}</span>
-                    <div class="midi-color-preview" data-color-id="${s.id}" style="background: rgb(${s.color.r}, ${s.color.g}, ${s.color.b})" title="Current Color"></div>
-                    <span class="midi-value" data-value-id="${s.id}" title="MIDI Value">${s.midiValue}</span>
+                    <label class="midi-field" title="What does the sampled value control?">
+                        <span class="midi-field-label">Target</span>
+                        <select name="sampler-${s.id}-controlTarget" data-id="${s.id}" data-prop="controlTarget">
+                            ${s.type === 'note' ? `
+                                <option value="velocity" ${s.controlTarget === 'velocity' ? 'selected' : ''}>→Velocity</option>
+                                <option value="note" ${s.controlTarget === 'note' ? 'selected' : ''}>→Note</option>
+                                <option value="both" ${s.controlTarget === 'both' ? 'selected' : ''}>→Note+Vel</option>
+                            ` : ''}
+                            ${s.type === 'cc' ? `
+                                <option value="value" ${s.controlTarget === 'value' ? 'selected' : ''}>→Value</option>
+                                <option value="cc" ${s.controlTarget === 'cc' ? 'selected' : ''}>→CC#</option>
+                            ` : ''}
+                        </select>
+                    </label>
+                    <label class="midi-field" title="Link to another sampler">
+                        <span class="midi-field-label">Link</span>
+                        <select name="sampler-${s.id}-linkedSamplerId" data-id="${s.id}" data-prop="linkedSamplerId">
+                            <option value="">No Link</option>
+                            ${samplers.filter(other => other.id !== s.id && other.type === s.type && other.channel === s.channel).map(other =>
+                                `<option value="${other.id}" ${s.linkedSamplerId === other.id ? 'selected' : ''}>Link→S${other.id}</option>`
+                            ).join('')}
+                        </select>
+                    </label>
+                    <label class="midi-field" title="Only send MIDI when value changes">
+                        <span class="midi-field-label">Δ Only</span>
+                        <input type="checkbox" name="sampler-${s.id}-sendOnChangeOnly" data-id="${s.id}" data-prop="sendOnChangeOnly" ${s.sendOnChangeOnly ? 'checked' : ''}>
+                    </label>
+                    <label class="midi-field" title="MIDI channel (1-16)">
+                        <span class="midi-field-label">Channel</span>
+                        <input type="number" name="sampler-${s.id}-channel" min="1" max="16" value="${s.channel}" data-id="${s.id}" data-prop="channel">
+                    </label>
+                    ${s.type === 'note' ? `
+                    <label class="midi-field" title="Note number (0-127)">
+                        <span class="midi-field-label">Note</span>
+                        <input type="number" name="sampler-${s.id}-noteNumber" min="0" max="127" value="${s.noteNumber}" data-id="${s.id}" data-prop="noteNumber">
+                    </label>` : ''}
+                    ${s.type === 'cc' ? `
+                    <label class="midi-field" title="CC number (0-127)">
+                        <span class="midi-field-label">CC#</span>
+                        <input type="number" name="sampler-${s.id}-ccNumber" min="0" max="127" value="${s.ccNumber}" data-id="${s.id}" data-prop="ccNumber">
+                    </label>` : ''}
+                    <label class="midi-field" title="Polling interval (ms)">
+                        <span class="midi-field-label">Rate (ms)</span>
+                        <input type="number" name="sampler-${s.id}-pollingInterval" min="10" max="5000" step="10" value="${s.pollingInterval}" data-id="${s.id}" data-prop="pollingInterval" style="width: 70px;">
+                    </label>
+                    <div class="midi-field" title="Time until next sample">
+                        <span class="midi-field-label">Next</span>
+                        <span class="midi-timer" data-timer-id="${s.id}">${s.displayTimeRemaining !== undefined ? s.displayTimeRemaining + 'ms' : '—'}</span>
+                    </div>
+                    <div class="midi-field" title="Current color">
+                        <span class="midi-field-label">Color</span>
+                        <div class="midi-color-preview" data-color-id="${s.id}" style="background: rgb(${s.color.r}, ${s.color.g}, ${s.color.b})"></div>
+                    </div>
+                    <div class="midi-field" title="MIDI value">
+                        <span class="midi-field-label">Value</span>
+                        <span class="midi-value" data-value-id="${s.id}">${s.midiValue}</span>
+                    </div>
                 </div>
-                ${(s.controlTarget === 'note' || s.type === 'program') ? `
+                ${(s.controlTarget === 'note' || s.controlTarget === 'both' || s.type === 'program') ? `
                 <div class="midi-scale-controls">
                     <label style="display: flex; align-items: center; gap: 5px; margin-bottom: 5px;">
                         <input type="checkbox" data-id="${s.id}" data-prop="quantizeToScale" ${s.quantizeToScale ? 'checked' : ''}>
                         <span style="font-size: 11px;">Quantize to Scale</span>
                     </label>
                     ${s.quantizeToScale ? `
-                    <div style="display: flex; gap: 5px; flex-wrap: wrap; margin-top: 5px;">
-                        <select data-id="${s.id}" data-prop="scaleType" title="Scale/Mode" style="flex: 1; min-width: 100px;">
+                    <div style="display: flex; gap: 5px; flex-wrap: wrap; margin-top: 5px; align-items: flex-end;">
+                        <label class="midi-field" title="Scale/Mode" style="flex: 1; min-width: 100px;">
+                        <span class="midi-field-label">Scale</span>
+                        <select name="sampler-${s.id}-scaleType" data-id="${s.id}" data-prop="scaleType" style="width: 100%;">
                             <option value="major" ${s.scaleType === 'major' ? 'selected' : ''}>Major</option>
                             <option value="minor" ${s.scaleType === 'minor' ? 'selected' : ''}>Minor</option>
                             <option value="dorian" ${s.scaleType === 'dorian' ? 'selected' : ''}>Dorian</option>
@@ -1010,18 +1101,39 @@
                             <option value="whole-tone" ${s.scaleType === 'whole-tone' ? 'selected' : ''}>Whole Tone</option>
                             <option value="chromatic" ${s.scaleType === 'chromatic' ? 'selected' : ''}>Chromatic</option>
                         </select>
-                        <select data-id="${s.id}" data-prop="scaleRootNote" title="Root Note" style="width: 55px;">
-                            ${noteNames.map(note => 
+                        </label>
+                        <label class="midi-field" title="Root note">
+                        <span class="midi-field-label">Root</span>
+                        <select name="sampler-${s.id}-scaleRootNote" data-id="${s.id}" data-prop="scaleRootNote" style="width: 55px;">
+                            ${noteNames.map(note =>
                                 `<option value="${note}" ${s.scaleRootNote === note ? 'selected' : ''}>${note}</option>`
                             ).join('')}
                         </select>
-                        <select data-id="${s.id}" data-prop="scaleRootOctave" title="Octave" style="width: 50px;">
-                            ${[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(oct => 
+                        </label>
+                        <label class="midi-field" title="Root octave">
+                        <span class="midi-field-label">Octave</span>
+                        <select name="sampler-${s.id}-scaleRootOctave" data-id="${s.id}" data-prop="scaleRootOctave" style="width: 50px;">
+                            ${[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(oct =>
                                 `<option value="${oct}" ${s.scaleRootOctave === oct ? 'selected' : ''}>${oct}</option>`
                             ).join('')}
                         </select>
-                        <input type="number" min="0" max="127" value="${s.noteRange.min}" data-id="${s.id}" data-prop="noteRangeMin" placeholder="Min" title="Min Note" style="width: 50px;">
-                        <input type="number" min="0" max="127" value="${s.noteRange.max}" data-id="${s.id}" data-prop="noteRangeMax" placeholder="Max" title="Max Note" style="width: 50px;">
+                        </label>
+                        <label class="midi-field" title="Lowest octave for quantized notes">
+                        <span class="midi-field-label">Min Oct</span>
+                        <select name="sampler-${s.id}-octaveMin" data-id="${s.id}" data-prop="octaveMin" style="width: 55px;">
+                            ${octaveChoices.map(oct =>
+                                `<option value="${oct}" ${(s.octaveMin !== undefined ? s.octaveMin : -1) === oct ? 'selected' : ''}>C${oct}</option>`
+                            ).join('')}
+                        </select>
+                        </label>
+                        <label class="midi-field" title="Highest octave for quantized notes">
+                        <span class="midi-field-label">Max Oct</span>
+                        <select name="sampler-${s.id}-octaveMax" data-id="${s.id}" data-prop="octaveMax" style="width: 55px;">
+                            ${octaveChoices.map(oct =>
+                                `<option value="${oct}" ${(s.octaveMax !== undefined ? s.octaveMax : 9) === oct ? 'selected' : ''}>B${oct}</option>`
+                            ).join('')}
+                        </select>
+                        </label>
                     </div>
                     ` : ''}
                 </div>
@@ -1033,10 +1145,11 @@
                         <span style="font-size: 11px;">Send Note Off</span>
                     </label>
                     ${s.sendNoteOff ? `
-                    <div style="display: flex; gap: 5px; align-items: center; margin-top: 5px;">
-                        <span style="font-size: 10px; color: #888;">Note-Off Delay:</span>
-                        <input type="number" min="0" max="5000" step="10" value="${s.noteOffDelay}" data-id="${s.id}" data-prop="noteOffDelay" placeholder="ms" title="Delay before note-off (ms)" style="width: 60px; padding: 6px 8px; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px; background: rgba(255, 255, 255, 0.1); color: #fff; font-size: 11px;">
-                        <span style="font-size: 10px; color: #888;">ms</span>
+                    <div style="display: flex; gap: 5px; align-items: flex-end; margin-top: 5px;">
+                        <label class="midi-field" title="Delay before note-off (ms)">
+                        <span class="midi-field-label">Note-Off Delay (ms)</span>
+                        <input type="number" name="sampler-${s.id}-noteOffDelay" min="0" max="5000" step="10" value="${s.noteOffDelay}" data-id="${s.id}" data-prop="noteOffDelay" style="width: 70px; padding: 6px 8px; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px; background: rgba(255, 255, 255, 0.1); color: #fff; font-size: 11px;">
+                        </label>
                     </div>
                     ` : ''}
                 </div>
@@ -1058,10 +1171,9 @@
                         if (prop === 'quantizeToScale' || prop === 'sendNoteOff') {
                             updateSamplersList(); // Refresh to show/hide controls
                         }
-                    } else if (prop === 'noteRangeMin') {
-                        sampler.noteRange.min = parseInt(e.target.value);
-                    } else if (prop === 'noteRangeMax') {
-                        sampler.noteRange.max = parseInt(e.target.value);
+                    } else if (prop === 'octaveMin' || prop === 'octaveMax') {
+                        sampler[prop] = parseInt(e.target.value);
+                        applyOctaveRange(sampler);
                     } else if (prop === 'scaleRootNote') {
                         sampler.scaleRootNote = e.target.value;
                         sampler.scaleRoot = midiNoteFromName(sampler.scaleRootNote, sampler.scaleRootOctave);
@@ -1076,6 +1188,9 @@
                     }
                     if (prop === 'type' || prop === 'controlTarget') {
                         updateSamplersList();
+                    }
+                    if (prop === 'name') {
+                        drawSamplers(); // refresh the canvas label
                     }
                 }
             });

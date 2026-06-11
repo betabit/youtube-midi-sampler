@@ -38,6 +38,14 @@
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     z-index: 999999;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: column;
+    resize: both;
+    overflow: hidden;
+    min-width: 380px;
+    min-height: 160px;
+    max-width: 95vw;
+    max-height: 90vh;
 }
 
 .midi-panel-header {
@@ -76,9 +84,43 @@
     font-size: 18px !important;
 }
 
+#midi-help-btn {
+    background: rgba(255, 255, 255, 0.15) !important;
+    padding: 4px 10px !important;
+}
+
+#midi-help {
+    margin-bottom: 12px;
+    padding: 10px;
+    background: rgba(74, 158, 255, 0.08);
+    border: 1px solid rgba(74, 158, 255, 0.25);
+    border-radius: 6px;
+    font-size: 11px;
+    line-height: 1.5;
+    color: #ccc;
+}
+
+#midi-help strong {
+    color: #4a9eff;
+    font-size: 12px;
+}
+
+#midi-help p {
+    margin: 6px 0;
+}
+
+#midi-help ul {
+    margin: 6px 0 0;
+    padding-left: 16px;
+}
+
+#midi-help li {
+    margin-bottom: 4px;
+}
+
 .midi-panel-content {
     padding: 15px;
-    max-height: 500px;
+    flex: 1;
     overflow-y: auto;
 }
 
@@ -134,9 +176,21 @@
     flex-wrap: wrap;
 }
 
-.midi-sampler-header strong {
-    font-size: 13px;
+.midi-sampler-name {
+    background: transparent;
+    border: none;
+    border-bottom: 1px dashed transparent;
     color: #4a9eff;
+    font-size: 13px;
+    font-weight: 600;
+    width: 130px;
+    padding: 2px 0;
+}
+
+.midi-sampler-name:hover,
+.midi-sampler-name:focus {
+    border-bottom-color: rgba(74, 158, 255, 0.5);
+    outline: none;
 }
 
 .midi-link-badge {
@@ -169,8 +223,35 @@
 .midi-sampler-controls {
     display: flex;
     gap: 6px;
-    align-items: center;
+    align-items: flex-end;
     flex-wrap: wrap;
+}
+
+.midi-field {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+}
+
+.midi-field-label {
+    font-size: 9px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+}
+
+.midi-field input[type="checkbox"] {
+    width: auto;
+    min-width: 0;
+    padding: 0;
+    margin: 4px 0 6px;
+}
+
+.midi-field .midi-timer,
+.midi-field .midi-value {
+    padding: 6px 0;
 }
 
 .midi-sampler-controls select,
