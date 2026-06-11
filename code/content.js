@@ -1,6 +1,11 @@
 (function() {
     'use strict';
 
+    // Preact + htm are vendored in code/vendor/ and loaded by the manifest
+    // before this file - declarative rendering with no build step
+    const { h, render } = self.preact;
+    const html = self.htm.bind(h);
+
     let midiAccess = null;
     let selectedOutput = null;
     let samplers = [];
@@ -33,7 +38,6 @@
     let globalDeltaThreshold = 1; // Global delta threshold for "send on change"
     let globalSendOnChangeOnly = false; // Global delta checkbox
     let globalMidiChannel = 1; // Global MIDI channel
-    let isUpdatingSamplersList = false; // Prevent refresh loops
     let presets = {}; // Store presets
     let tempCanvas = null; // Reused across sampleColors ticks
     let tempCtx = null;
@@ -53,10 +57,6 @@
     function midiNoteFromName(noteName, octave) {
         const noteIndex = noteNames.indexOf(noteName);
         return (octave + 1) * 12 + noteIndex;
-    }
-
-    function escapeAttr(str) {
-        return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
     }
 
     function makeDraggable(el, handle) {
@@ -1172,8 +1172,6 @@
     }
 
     function updateTimers() {
-        if (isUpdatingSamplersList) return; // Don't update if list is being modified
-        
         const currentTime = Date.now();
         let hasChanges = false;
         
@@ -1522,227 +1520,200 @@
         }
     }
 
-    function updateSamplersList() {
-        if (isUpdatingSamplersList) return; // Prevent re-entry
-        isUpdatingSamplersList = true;
-        
-        const list = document.getElementById('midi-samplers-list');
-        list.innerHTML = '';
-        
-        samplers.forEach(s => {
-            const div = document.createElement('div');
-            div.className = 'midi-sampler-item';
-            
-            // Check if this sampler is linked FROM another sampler
-            const linkedFrom = samplers.filter(other => other.linkedSamplerId === s.id);
-            const isLinkedTo = s.linkedSamplerId !== null;
-            
-            div.innerHTML = `
+    // --- Preact sampler list (declarative; replaces the innerHTML rebuild) ---
+
+    function updateSamplerProp(s, prop, e) {
+        const target = e.target;
+        if (prop === 'linkedSamplerId') {
+            s.linkedSamplerId = target.value ? parseInt(target.value) : null;
+        } else if (prop === 'quantizeToScale' || prop === 'sendOnChangeOnly' || prop === 'sendNoteOff') {
+            s[prop] = target.checked;
+        } else if (prop === 'octaveMin' || prop === 'octaveMax') {
+            s[prop] = parseInt(target.value);
+            applyOctaveRange(s);
+        } else if (prop === 'scaleRootNote') {
+            s.scaleRootNote = target.value;
+            s.scaleRoot = midiNoteFromName(s.scaleRootNote, s.scaleRootOctave);
+        } else if (prop === 'scaleRootOctave') {
+            s.scaleRootOctave = parseInt(target.value);
+            s.scaleRoot = midiNoteFromName(s.scaleRootNote, s.scaleRootOctave);
+        } else if (prop === 'pollingInterval') {
+            s.pollingInterval = parseInt(target.value);
+            s.hasCustomPollingInterval = true; // Mark as custom
+        } else {
+            s[prop] = target.type === 'number' ? parseInt(target.value) : target.value;
+        }
+        if (prop === 'name') {
+            drawSamplers(); // refresh the canvas label
+        }
+        updateSamplersList(); // cheap: Preact diffs the DOM and keeps focus
+    }
+
+    function deleteSampler(id) {
+        samplers = samplers.filter(s => s.id !== id);
+        updateSamplersList();
+        drawSamplers();
+    }
+
+    function Field({ label, title, children }) {
+        return html`
+            <label class="midi-field" title=${title}>
+                <span class="midi-field-label">${label}</span>
+                ${children}
+            </label>
+        `;
+    }
+
+    function SamplerItem({ s }) {
+        const linkedFrom = samplers.filter(other => other.linkedSamplerId === s.id);
+        const linkChoices = samplers.filter(other => other.id !== s.id && other.type === s.type && other.channel === s.channel);
+        const showScale = s.controlTarget === 'note' || s.controlTarget === 'both' || s.type === 'program';
+        const set = prop => e => updateSamplerProp(s, prop, e);
+
+        return html`
+            <div class="midi-sampler-item">
                 <div class="midi-sampler-header">
-                    <input type="text" class="midi-sampler-name" name="sampler-${s.id}-name" value="${escapeAttr(s.name || 'Sampler ' + s.id)}" data-id="${s.id}" data-prop="name" title="Click to rename this sampler">
-                    ${linkedFrom.length > 0 ? `<span class="midi-link-badge" title="Linked from Sampler(s): ${linkedFrom.map(l => l.id).join(', ')}">← ${linkedFrom.map(l => 'S' + l.id).join(', ')}</span>` : ''}
-                    ${isLinkedTo ? `<span class="midi-link-badge midi-link-badge-out" title="Linked to Sampler ${s.linkedSamplerId}">→ S${s.linkedSamplerId}</span>` : ''}
-                    <button class="midi-delete-btn" data-id="${s.id}">×</button>
+                    <input type="text" class="midi-sampler-name" name="sampler-${s.id}-name" value=${s.name || 'Sampler ' + s.id} onChange=${set('name')} title="Click to rename this sampler" />
+                    ${linkedFrom.length > 0 && html`<span class="midi-link-badge" title=${'Linked from: ' + linkedFrom.map(l => 'S' + l.id).join(', ')}>← ${linkedFrom.map(l => 'S' + l.id).join(', ')}</span>`}
+                    ${s.linkedSamplerId !== null && html`<span class="midi-link-badge midi-link-badge-out" title=${'Linked to Sampler ' + s.linkedSamplerId}>→ S${s.linkedSamplerId}</span>`}
+                    <button class="midi-delete-btn" onClick=${() => deleteSampler(s.id)}>×</button>
                 </div>
                 <div class="midi-sampler-controls">
-                    <label class="midi-field" title="MIDI message type">
-                        <span class="midi-field-label">Type</span>
-                        <select name="sampler-${s.id}-type" data-id="${s.id}" data-prop="type">
-                            <option value="note" ${s.type === 'note' ? 'selected' : ''}>Note</option>
-                            <option value="cc" ${s.type === 'cc' ? 'selected' : ''}>CC</option>
-                            <option value="program" ${s.type === 'program' ? 'selected' : ''}>Program</option>
+                    <${Field} label="Type" title="MIDI message type">
+                        <select name="sampler-${s.id}-type" value=${s.type} onChange=${set('type')}>
+                            <option value="note">Note</option>
+                            <option value="cc">CC</option>
+                            <option value="program">Program</option>
                         </select>
-                    </label>
-                    <label class="midi-field" title="What does the sampled value control?">
-                        <span class="midi-field-label">Target</span>
-                        <select name="sampler-${s.id}-controlTarget" data-id="${s.id}" data-prop="controlTarget">
-                            ${s.type === 'note' ? `
-                                <option value="velocity" ${s.controlTarget === 'velocity' ? 'selected' : ''}>→Velocity</option>
-                                <option value="note" ${s.controlTarget === 'note' ? 'selected' : ''}>→Note</option>
-                                <option value="both" ${s.controlTarget === 'both' ? 'selected' : ''}>→Note+Vel</option>
-                            ` : ''}
-                            ${s.type === 'cc' ? `
-                                <option value="value" ${s.controlTarget === 'value' ? 'selected' : ''}>→Value</option>
-                                <option value="cc" ${s.controlTarget === 'cc' ? 'selected' : ''}>→CC#</option>
-                            ` : ''}
+                    <//>
+                    <${Field} label="Target" title="What does the sampled value control?">
+                        <select name="sampler-${s.id}-controlTarget" value=${s.controlTarget} onChange=${set('controlTarget')}>
+                            ${s.type === 'note' && html`
+                                <option value="velocity">→Velocity</option>
+                                <option value="note">→Note</option>
+                                <option value="both">→Note+Vel</option>
+                            `}
+                            ${s.type === 'cc' && html`
+                                <option value="value">→Value</option>
+                                <option value="cc">→CC#</option>
+                            `}
                         </select>
-                    </label>
-                    <label class="midi-field" title="Link to another sampler">
-                        <span class="midi-field-label">Link</span>
-                        <select name="sampler-${s.id}-linkedSamplerId" data-id="${s.id}" data-prop="linkedSamplerId">
+                    <//>
+                    <${Field} label="Link" title="Link to another sampler">
+                        <select name="sampler-${s.id}-linkedSamplerId" value=${s.linkedSamplerId || ''} onChange=${set('linkedSamplerId')}>
                             <option value="">No Link</option>
-                            ${samplers.filter(other => other.id !== s.id && other.type === s.type && other.channel === s.channel).map(other =>
-                                `<option value="${other.id}" ${s.linkedSamplerId === other.id ? 'selected' : ''}>Link→S${other.id}</option>`
-                            ).join('')}
+                            ${linkChoices.map(other => html`<option key=${other.id} value=${other.id}>Link→S${other.id}</option>`)}
                         </select>
-                    </label>
-                    <label class="midi-field" title="Only send MIDI when value changes">
-                        <span class="midi-field-label">Δ Only</span>
-                        <input type="checkbox" name="sampler-${s.id}-sendOnChangeOnly" data-id="${s.id}" data-prop="sendOnChangeOnly" ${s.sendOnChangeOnly ? 'checked' : ''}>
-                    </label>
-                    <label class="midi-field" title="MIDI channel (1-16)">
-                        <span class="midi-field-label">Channel</span>
-                        <input type="number" name="sampler-${s.id}-channel" min="1" max="16" value="${s.channel}" data-id="${s.id}" data-prop="channel">
-                    </label>
-                    ${s.type === 'note' ? `
-                    <label class="midi-field" title="Note number (0-127)">
-                        <span class="midi-field-label">Note</span>
-                        <input type="number" name="sampler-${s.id}-noteNumber" min="0" max="127" value="${s.noteNumber}" data-id="${s.id}" data-prop="noteNumber">
-                    </label>` : ''}
-                    ${s.type === 'cc' ? `
-                    <label class="midi-field" title="CC number (0-127)">
-                        <span class="midi-field-label">CC#</span>
-                        <input type="number" name="sampler-${s.id}-ccNumber" min="0" max="127" value="${s.ccNumber}" data-id="${s.id}" data-prop="ccNumber">
-                    </label>` : ''}
-                    <label class="midi-field" title="Polling interval (ms)">
-                        <span class="midi-field-label">Rate (ms)</span>
-                        <input type="number" name="sampler-${s.id}-pollingInterval" min="10" max="5000" step="10" value="${s.pollingInterval}" data-id="${s.id}" data-prop="pollingInterval" style="width: 70px;">
-                    </label>
+                    <//>
+                    <${Field} label="Δ Only" title="Only send MIDI when value changes">
+                        <input type="checkbox" name="sampler-${s.id}-sendOnChangeOnly" checked=${s.sendOnChangeOnly} onChange=${set('sendOnChangeOnly')} />
+                    <//>
+                    <${Field} label="Channel" title="MIDI channel (1-16)">
+                        <input type="number" name="sampler-${s.id}-channel" min="1" max="16" value=${s.channel} onChange=${set('channel')} />
+                    <//>
+                    ${s.type === 'note' && html`
+                        <${Field} label="Note" title="Note number (0-127)">
+                            <input type="number" name="sampler-${s.id}-noteNumber" min="0" max="127" value=${s.noteNumber} onChange=${set('noteNumber')} />
+                        <//>
+                    `}
+                    ${s.type === 'cc' && html`
+                        <${Field} label="CC#" title="CC number (0-127)">
+                            <input type="number" name="sampler-${s.id}-ccNumber" min="0" max="127" value=${s.ccNumber} onChange=${set('ccNumber')} />
+                        <//>
+                    `}
+                    <${Field} label="Rate (ms)" title="Polling interval (ms)">
+                        <input type="number" name="sampler-${s.id}-pollingInterval" min="10" max="5000" step="10" value=${s.pollingInterval} onChange=${set('pollingInterval')} style="width: 70px;" />
+                    <//>
                     <div class="midi-field" title="Time until next sample">
                         <span class="midi-field-label">Next</span>
-                        <span class="midi-timer" data-timer-id="${s.id}">${s.displayTimeRemaining !== undefined ? s.displayTimeRemaining + 'ms' : '—'}</span>
+                        <span class="midi-timer" data-timer-id=${s.id}>${s.displayTimeRemaining !== undefined ? s.displayTimeRemaining + 'ms' : '—'}</span>
                     </div>
                     <div class="midi-field" title="Current color">
                         <span class="midi-field-label">Color</span>
-                        <div class="midi-color-preview" data-color-id="${s.id}" style="background: rgb(${s.color.r}, ${s.color.g}, ${s.color.b})"></div>
+                        <div class="midi-color-preview" data-color-id=${s.id} style="background: rgb(${s.color.r}, ${s.color.g}, ${s.color.b})"></div>
                     </div>
                     <div class="midi-field" title="MIDI value">
                         <span class="midi-field-label">Value</span>
-                        <span class="midi-value" data-value-id="${s.id}">${s.midiValue}</span>
+                        <span class="midi-value" data-value-id=${s.id}>${s.midiValue}</span>
                     </div>
                 </div>
-                ${(s.controlTarget === 'note' || s.controlTarget === 'both' || s.type === 'program') ? `
+                ${showScale && html`
                 <div class="midi-scale-controls">
                     <label style="display: flex; align-items: center; gap: 5px; margin-bottom: 5px;">
-                        <input type="checkbox" data-id="${s.id}" data-prop="quantizeToScale" ${s.quantizeToScale ? 'checked' : ''}>
+                        <input type="checkbox" checked=${s.quantizeToScale} onChange=${set('quantizeToScale')} />
                         <span style="font-size: 11px;">Quantize to Scale</span>
                     </label>
-                    ${s.quantizeToScale ? `
+                    ${s.quantizeToScale && html`
                     <div style="display: flex; gap: 5px; flex-wrap: wrap; margin-top: 5px; align-items: flex-end;">
                         <label class="midi-field" title="Scale/Mode" style="flex: 1; min-width: 100px;">
-                        <span class="midi-field-label">Scale</span>
-                        <select name="sampler-${s.id}-scaleType" data-id="${s.id}" data-prop="scaleType" style="width: 100%;">
-                            <option value="major" ${s.scaleType === 'major' ? 'selected' : ''}>Major</option>
-                            <option value="minor" ${s.scaleType === 'minor' ? 'selected' : ''}>Minor</option>
-                            <option value="dorian" ${s.scaleType === 'dorian' ? 'selected' : ''}>Dorian</option>
-                            <option value="phrygian" ${s.scaleType === 'phrygian' ? 'selected' : ''}>Phrygian</option>
-                            <option value="lydian" ${s.scaleType === 'lydian' ? 'selected' : ''}>Lydian</option>
-                            <option value="mixolydian" ${s.scaleType === 'mixolydian' ? 'selected' : ''}>Mixolydian</option>
-                            <option value="locrian" ${s.scaleType === 'locrian' ? 'selected' : ''}>Locrian</option>
-                            <option value="harmonic-minor" ${s.scaleType === 'harmonic-minor' ? 'selected' : ''}>Harmonic Minor</option>
-                            <option value="melodic-minor" ${s.scaleType === 'melodic-minor' ? 'selected' : ''}>Melodic Minor</option>
-                            <option value="pentatonic-major" ${s.scaleType === 'pentatonic-major' ? 'selected' : ''}>Pentatonic Major</option>
-                            <option value="pentatonic-minor" ${s.scaleType === 'pentatonic-minor' ? 'selected' : ''}>Pentatonic Minor</option>
-                            <option value="blues" ${s.scaleType === 'blues' ? 'selected' : ''}>Blues</option>
-                            <option value="whole-tone" ${s.scaleType === 'whole-tone' ? 'selected' : ''}>Whole Tone</option>
-                            <option value="chromatic" ${s.scaleType === 'chromatic' ? 'selected' : ''}>Chromatic</option>
-                        </select>
+                            <span class="midi-field-label">Scale</span>
+                            <select name="sampler-${s.id}-scaleType" value=${s.scaleType} onChange=${set('scaleType')} style="width: 100%;">
+                                <option value="major">Major</option>
+                                <option value="minor">Minor</option>
+                                <option value="dorian">Dorian</option>
+                                <option value="phrygian">Phrygian</option>
+                                <option value="lydian">Lydian</option>
+                                <option value="mixolydian">Mixolydian</option>
+                                <option value="locrian">Locrian</option>
+                                <option value="harmonic-minor">Harmonic Minor</option>
+                                <option value="melodic-minor">Melodic Minor</option>
+                                <option value="pentatonic-major">Pentatonic Major</option>
+                                <option value="pentatonic-minor">Pentatonic Minor</option>
+                                <option value="blues">Blues</option>
+                                <option value="whole-tone">Whole Tone</option>
+                                <option value="chromatic">Chromatic</option>
+                            </select>
                         </label>
-                        <label class="midi-field" title="Root note">
-                        <span class="midi-field-label">Root</span>
-                        <select name="sampler-${s.id}-scaleRootNote" data-id="${s.id}" data-prop="scaleRootNote" style="width: 55px;">
-                            ${noteNames.map(note =>
-                                `<option value="${note}" ${s.scaleRootNote === note ? 'selected' : ''}>${note}</option>`
-                            ).join('')}
-                        </select>
-                        </label>
-                        <label class="midi-field" title="Root octave">
-                        <span class="midi-field-label">Octave</span>
-                        <select name="sampler-${s.id}-scaleRootOctave" data-id="${s.id}" data-prop="scaleRootOctave" style="width: 50px;">
-                            ${[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(oct =>
-                                `<option value="${oct}" ${s.scaleRootOctave === oct ? 'selected' : ''}>${oct}</option>`
-                            ).join('')}
-                        </select>
-                        </label>
-                        <label class="midi-field" title="Lowest octave for quantized notes">
-                        <span class="midi-field-label">Min Oct</span>
-                        <select name="sampler-${s.id}-octaveMin" data-id="${s.id}" data-prop="octaveMin" style="width: 55px;">
-                            ${octaveChoices.map(oct =>
-                                `<option value="${oct}" ${(s.octaveMin !== undefined ? s.octaveMin : -1) === oct ? 'selected' : ''}>C${oct}</option>`
-                            ).join('')}
-                        </select>
-                        </label>
-                        <label class="midi-field" title="Highest octave for quantized notes">
-                        <span class="midi-field-label">Max Oct</span>
-                        <select name="sampler-${s.id}-octaveMax" data-id="${s.id}" data-prop="octaveMax" style="width: 55px;">
-                            ${octaveChoices.map(oct =>
-                                `<option value="${oct}" ${(s.octaveMax !== undefined ? s.octaveMax : 9) === oct ? 'selected' : ''}>B${oct}</option>`
-                            ).join('')}
-                        </select>
-                        </label>
+                        <${Field} label="Root" title="Root note">
+                            <select name="sampler-${s.id}-scaleRootNote" value=${s.scaleRootNote} onChange=${set('scaleRootNote')} style="width: 55px;">
+                                ${noteNames.map(note => html`<option key=${note} value=${note}>${note}</option>`)}
+                            </select>
+                        <//>
+                        <${Field} label="Octave" title="Root octave">
+                            <select name="sampler-${s.id}-scaleRootOctave" value=${s.scaleRootOctave} onChange=${set('scaleRootOctave')} style="width: 50px;">
+                                ${[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(oct => html`<option key=${oct} value=${oct}>${oct}</option>`)}
+                            </select>
+                        <//>
+                        <${Field} label="Min Oct" title="Lowest octave for quantized notes">
+                            <select name="sampler-${s.id}-octaveMin" value=${s.octaveMin !== undefined ? s.octaveMin : -1} onChange=${set('octaveMin')} style="width: 55px;">
+                                ${octaveChoices.map(oct => html`<option key=${oct} value=${oct}>C${oct}</option>`)}
+                            </select>
+                        <//>
+                        <${Field} label="Max Oct" title="Highest octave for quantized notes">
+                            <select name="sampler-${s.id}-octaveMax" value=${s.octaveMax !== undefined ? s.octaveMax : 9} onChange=${set('octaveMax')} style="width: 55px;">
+                                ${octaveChoices.map(oct => html`<option key=${oct} value=${oct}>B${oct}</option>`)}
+                            </select>
+                        <//>
                     </div>
-                    ` : ''}
+                    `}
                 </div>
-                ` : ''}
-                ${s.type === 'note' ? `
+                `}
+                ${s.type === 'note' && html`
                 <div class="midi-scale-controls" style="margin-top: 8px;">
                     <label style="display: flex; align-items: center; gap: 5px; margin-bottom: 5px;">
-                        <input type="checkbox" data-id="${s.id}" data-prop="sendNoteOff" ${s.sendNoteOff ? 'checked' : ''}>
+                        <input type="checkbox" checked=${s.sendNoteOff} onChange=${set('sendNoteOff')} />
                         <span style="font-size: 11px;">Send Note Off</span>
                     </label>
-                    ${s.sendNoteOff ? `
+                    ${s.sendNoteOff && html`
                     <div style="display: flex; gap: 5px; align-items: flex-end; margin-top: 5px;">
-                        <label class="midi-field" title="Delay before note-off (ms)">
-                        <span class="midi-field-label">Note-Off Delay (ms)</span>
-                        <input type="number" name="sampler-${s.id}-noteOffDelay" min="0" max="5000" step="10" value="${s.noteOffDelay}" data-id="${s.id}" data-prop="noteOffDelay" style="width: 70px; padding: 6px 8px; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px; background: rgba(255, 255, 255, 0.1); color: #fff; font-size: 11px;">
-                        </label>
+                        <${Field} label="Note-Off Delay (ms)" title="Delay before note-off (ms)">
+                            <input type="number" name="sampler-${s.id}-noteOffDelay" min="0" max="5000" step="10" value=${s.noteOffDelay} onChange=${set('noteOffDelay')} style="width: 70px;" />
+                        <//>
                     </div>
-                    ` : ''}
+                    `}
                 </div>
-                ` : ''}
-            `;
-            list.appendChild(div);
-        });
-
-        list.querySelectorAll('input, select').forEach(el => {
-            el.addEventListener('change', (e) => {
-                const id = parseInt(e.target.dataset.id);
-                const prop = e.target.dataset.prop;
-                const sampler = samplers.find(s => s.id === id);
-                if (sampler) {
-                    if (prop === 'linkedSamplerId') {
-                        sampler[prop] = e.target.value ? parseInt(e.target.value) : null;
-                    } else if (prop === 'quantizeToScale' || prop === 'sendOnChangeOnly' || prop === 'sendNoteOff') {
-                        sampler[prop] = e.target.checked;
-                        if (prop === 'quantizeToScale' || prop === 'sendNoteOff') {
-                            updateSamplersList(); // Refresh to show/hide controls
-                        }
-                    } else if (prop === 'octaveMin' || prop === 'octaveMax') {
-                        sampler[prop] = parseInt(e.target.value);
-                        applyOctaveRange(sampler);
-                    } else if (prop === 'scaleRootNote') {
-                        sampler.scaleRootNote = e.target.value;
-                        sampler.scaleRoot = midiNoteFromName(sampler.scaleRootNote, sampler.scaleRootOctave);
-                    } else if (prop === 'scaleRootOctave') {
-                        sampler.scaleRootOctave = parseInt(e.target.value);
-                        sampler.scaleRoot = midiNoteFromName(sampler.scaleRootNote, sampler.scaleRootOctave);
-                    } else if (prop === 'pollingInterval') {
-                        sampler.pollingInterval = parseInt(e.target.value);
-                        sampler.hasCustomPollingInterval = true; // Mark as custom
-                    } else {
-                        sampler[prop] = e.target.type === 'number' ? parseInt(e.target.value) : e.target.value;
-                    }
-                    if (prop === 'type' || prop === 'controlTarget') {
-                        updateSamplersList();
-                    }
-                    if (prop === 'name') {
-                        drawSamplers(); // refresh the canvas label
-                    }
-                }
-            });
-        });
-
-        list.querySelectorAll('.midi-delete-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const id = parseInt(e.target.dataset.id);
-                samplers = samplers.filter(s => s.id !== id);
-                updateSamplersList();
-                drawSamplers();
-            });
-        });
-        
-        isUpdatingSamplersList = false; // Release lock
+                `}
+            </div>
+        `;
     }
+
+    function updateSamplersList() {
+        const list = document.getElementById('midi-samplers-list');
+        if (!list) return;
+        render(html`${samplers.map(s => html`<${SamplerItem} key=${s.id} s=${s} />`)}`, list);
+    }
+
+    // --- end Preact sampler list ---
 
     function updateStatus(msg) {
         const statusEl = document.getElementById('midi-status');
