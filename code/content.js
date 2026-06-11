@@ -27,6 +27,7 @@
     let playbackInterval = null;
     let playbackStartTime = 0;
     let playbackIndex = 0;
+    let recordings = {}; // Saved named recordings
     let timerInterval = null;
     let globalPollingInterval = 50; // Global default polling rate
     let globalDeltaThreshold = 1; // Global delta threshold for "send on change"
@@ -254,6 +255,7 @@
                         <ul>
                             <li><em>● Record</em> – captures every MIDI message sent to the output (notes, note-offs, CCs) with timing, until stopped. Starting a new recording replaces the unsaved one.</li>
                             <li><em>▶ Play</em> – replays the current recording to the selected output with original timing. Stopping mid-take sends All Notes Off. Playback is not shown in the logger.</li>
+                            <li><em>Save Recording</em> – stores the current take under a name (kept in this browser's local storage). <em>Select Recording</em> loads one; <em>Delete</em> removes it.</li>
                         </ul>
                         Tip: enable Δ Only on samplers to keep recordings compact.
                     </div>
@@ -261,6 +263,13 @@
                         <button id="midi-record-btn">● Record</button>
                         <button id="midi-play-btn">▶ Play</button>
                         <span id="midi-record-status">no recording</span>
+                    </div>
+                    <div class="midi-control-group">
+                        <button id="save-recording-btn" title="Save the current recording">Save Recording</button>
+                        <select id="recording-select" title="Load recording">
+                            <option value="">Select Recording...</option>
+                        </select>
+                        <button id="delete-recording-btn" title="Delete selected recording">Delete</button>
                     </div>
                 </div>
                 <div class="midi-section">
@@ -479,8 +488,13 @@
         document.getElementById('save-preset-btn').addEventListener('click', savePreset);
         document.getElementById('preset-select').addEventListener('change', loadPreset);
         document.getElementById('delete-preset-btn').addEventListener('click', deletePreset);
-        
+
+        document.getElementById('save-recording-btn').addEventListener('click', saveRecording);
+        document.getElementById('recording-select').addEventListener('change', loadRecording);
+        document.getElementById('delete-recording-btn').addEventListener('click', deleteRecording);
+
         loadPresetsFromStorage();
+        loadRecordingsFromStorage();
 
         overlayCanvas.addEventListener('mousedown', handleMouseDown);
         overlayCanvas.addEventListener('mousemove', handleMouseMove);
@@ -929,6 +943,72 @@
             sendAllNotesOff(); // a mid-take stop can leave notes hanging
             updateStatus('Playback stopped');
         }
+    }
+
+    function saveRecording() {
+        if (recordedEvents.length === 0) {
+            updateStatus('Nothing recorded to save');
+            return;
+        }
+        const name = prompt('Enter recording name:');
+        if (!name) return;
+
+        recordings[name] = {
+            events: recordedEvents.map(ev => ({ t: ev.t, bytes: [...ev.bytes] })),
+            savedAt: Date.now()
+        };
+        localStorage.setItem('midiSamplerRecordings', JSON.stringify(recordings));
+        updateRecordingList();
+        updateStatus(`Recording "${name}" saved`);
+    }
+
+    function loadRecording(e) {
+        const name = e.target.value;
+        if (!name || !recordings[name]) return;
+        if (isPlaying) stopPlayback();
+        if (isRecording) stopRecording();
+
+        recordedEvents = recordings[name].events.map(ev => ({ t: ev.t, bytes: [...ev.bytes] }));
+        updateRecordStatus();
+        updateStatus(`Recording "${name}" loaded`);
+    }
+
+    function deleteRecording() {
+        const name = document.getElementById('recording-select').value;
+        if (!name || !recordings[name]) {
+            updateStatus('Select a recording to delete');
+            return;
+        }
+
+        if (confirm(`Delete recording "${name}"?`)) {
+            delete recordings[name];
+            localStorage.setItem('midiSamplerRecordings', JSON.stringify(recordings));
+            updateRecordingList();
+            updateStatus(`Recording "${name}" deleted`);
+        }
+    }
+
+    function loadRecordingsFromStorage() {
+        try {
+            const stored = localStorage.getItem('midiSamplerRecordings');
+            if (stored) {
+                recordings = JSON.parse(stored);
+                updateRecordingList();
+            }
+        } catch (e) {
+            console.error('Error loading recordings:', e);
+        }
+    }
+
+    function updateRecordingList() {
+        const select = document.getElementById('recording-select');
+        select.innerHTML = '<option value="">Select Recording...</option>';
+        Object.keys(recordings).forEach(name => {
+            const option = document.createElement('option');
+            option.value = name;
+            option.textContent = name;
+            select.appendChild(option);
+        });
     }
 
     function updateTimers() {
