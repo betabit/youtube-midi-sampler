@@ -108,7 +108,16 @@
                     </ul>
                 </div>
                 <div class="midi-section">
-                    <div class="midi-section-title">MIDI Connection</div>
+                    <div class="midi-section-title">
+                        <span>MIDI Connection</span>
+                        <button class="midi-section-help-btn" data-help="connection" title="About these controls">?</button>
+                    </div>
+                    <div class="midi-help-box" id="midi-help-connection" style="display: none;">
+                        <ul>
+                            <li><em>Connect MIDI</em> – asks the browser for MIDI access (allow the prompt).</li>
+                            <li><em>Output</em> – the device or virtual port that receives the messages, e.g. an IAC bus into your DAW. Nothing is sent or logged until an output is selected.</li>
+                        </ul>
+                    </div>
                     <div class="midi-control-group">
                         <button id="midi-connect-btn">Connect MIDI</button>
                         <select id="midi-output-select">
@@ -117,7 +126,19 @@
                     </div>
                 </div>
                 <div class="midi-section">
-                    <div class="midi-section-title">Global Parameters</div>
+                    <div class="midi-section-title">
+                        <span>Global Parameters</span>
+                        <button class="midi-section-help-btn" data-help="globals" title="About these controls">?</button>
+                    </div>
+                    <div class="midi-help-box" id="midi-help-globals" style="display: none;">
+                        Defaults applied to newly created samplers:
+                        <ul>
+                            <li><em>Channel</em> – MIDI channel (1–16) new samplers start on.</li>
+                            <li><em>Rate</em> – how often samplers read the video color, in milliseconds. Samplers without a custom rate follow changes to this.</li>
+                            <li><em>Delta Threshold</em> – with Δ Only on, the minimum change in MIDI value (0–127) before another message is sent.</li>
+                            <li><em>Δ Only</em> – new samplers only send when their value changes by at least the threshold, instead of on every poll.</li>
+                        </ul>
+                    </div>
                     <div class="midi-control-group">
                         <label style="display: flex; align-items: center; gap: 5px; font-size: 12px;">
                             <span>Channel:</span>
@@ -139,7 +160,17 @@
                     </div>
                 </div>
                 <div class="midi-section">
-                    <div class="midi-section-title">Presets</div>
+                    <div class="midi-section-title">
+                        <span>Presets</span>
+                        <button class="midi-section-help-btn" data-help="presets" title="About these controls">?</button>
+                    </div>
+                    <div class="midi-help-box" id="midi-help-presets" style="display: none;">
+                        <ul>
+                            <li><em>Save Preset</em> – stores all samplers and the global parameters under a name (kept in this browser's local storage).</li>
+                            <li><em>Select Preset</em> – loads a saved preset, replacing the current samplers.</li>
+                            <li><em>Delete</em> – removes the preset chosen in the dropdown.</li>
+                        </ul>
+                    </div>
                     <div class="midi-control-group">
                         <button id="save-preset-btn" title="Save current state as preset">Save Preset</button>
                         <select id="preset-select" title="Load preset">
@@ -149,7 +180,24 @@
                     </div>
                 </div>
                 <div class="midi-section">
-                    <div class="midi-section-title">Samplers</div>
+                    <div class="midi-section-title">
+                        <span>Samplers</span>
+                        <button class="midi-section-help-btn" data-help="samplers" title="About these controls">?</button>
+                    </div>
+                    <div class="midi-help-box" id="midi-help-samplers" style="display: none;">
+                        <em>+ Add Sampler</em> then drag a box on the video; the box's average color becomes a MIDI value (0–127, by brightness). Drag a box to move it, drag its bottom-right corner to resize, click its name to rename. Per-sampler fields:
+                        <ul>
+                            <li><em>Type</em> – the MIDI message kind: Note, CC, or Program Change.</li>
+                            <li><em>Target</em> – what the sampled value drives: →Note (fixed velocity), →Velocity (fixed note), →Note+Vel (both), →Value or →CC# for CC samplers.</li>
+                            <li><em>Link</em> – combine two samplers into one message (see the ? in the title bar).</li>
+                            <li><em>Δ Only</em> – send only when the value changes by the global delta threshold.</li>
+                            <li><em>Channel / Note / CC#</em> – the channel, and the fixed note or controller number when the Target doesn't control it.</li>
+                            <li><em>Rate (ms)</em> – this sampler's polling interval, overriding the global rate.</li>
+                            <li><em>Next / Color / Value</em> – countdown to the next sample, the current color, and the resulting MIDI value.</li>
+                            <li><em>Quantize to Scale</em> – snap →Note values to a key: pick Scale, Root, Octave, and the Min/Max octave range.</li>
+                            <li><em>Send Note Off</em> – send a note-off when the note changes, optionally delayed.</li>
+                        </ul>
+                    </div>
                     <div class="midi-control-group">
                         <button id="midi-add-sampler-btn">+ Add Sampler</button>
                         <label>
@@ -159,7 +207,15 @@
                     <div id="midi-samplers-list"></div>
                 </div>
                 <div class="midi-section">
-                    <div class="midi-section-title">Logging</div>
+                    <div class="midi-section-title">
+                        <span>Logging</span>
+                        <button class="midi-section-help-btn" data-help="logging" title="About these controls">?</button>
+                    </div>
+                    <div class="midi-help-box" id="midi-help-logging" style="display: none;">
+                        <ul>
+                            <li><em>Show MIDI Logger</em> – displays the last 20 messages sent (newest first), including note-offs and system events. Requires a selected MIDI output.</li>
+                        </ul>
+                    </div>
                     <div class="midi-control-group">
                         <label>
                             <input type="checkbox" id="midi-show-logger"> Show MIDI Logger
@@ -240,6 +296,15 @@
         document.getElementById('midi-help-btn').addEventListener('click', () => {
             const helpEl = document.getElementById('midi-help');
             helpEl.style.display = helpEl.style.display === 'none' ? 'block' : 'none';
+        });
+
+        panel.querySelectorAll('.midi-section-help-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const helpEl = document.getElementById('midi-help-' + btn.dataset.help);
+                if (helpEl) {
+                    helpEl.style.display = helpEl.style.display === 'none' ? 'block' : 'none';
+                }
+            });
         });
 
         document.getElementById('midi-close-btn').addEventListener('click', () => {
