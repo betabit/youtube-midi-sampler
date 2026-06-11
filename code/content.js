@@ -257,6 +257,7 @@
                             <li><em>▶ Play</em> – replays the current recording to the selected output with original timing. Stopping mid-take sends All Notes Off. Playback is not shown in the logger.</li>
                             <li><em>Save Recording</em> – stores the current take under a name (kept in this browser's local storage). <em>Select Recording</em> loads one; <em>Delete</em> removes it.</li>
                             <li><em>Edit Events</em> – shows the take as an editable list: change times (ms) and data values, or delete events. Time edits take effect (and re-order) on play.</li>
+                            <li><em>Export .mid</em> – downloads the current recording as a standard MIDI file (format 0, 120 BPM) for any DAW.</li>
                         </ul>
                         Tip: enable Δ Only on samplers to keep recordings compact.
                     </div>
@@ -271,6 +272,7 @@
                             <option value="">Select Recording...</option>
                         </select>
                         <button id="delete-recording-btn" title="Delete selected recording">Delete</button>
+                        <button id="export-recording-btn" title="Download the current recording as a standard MIDI file">Export .mid</button>
                     </div>
                     <div class="midi-control-group">
                         <label>
@@ -507,6 +509,7 @@
         document.getElementById('save-recording-btn').addEventListener('click', saveRecording);
         document.getElementById('recording-select').addEventListener('change', loadRecording);
         document.getElementById('delete-recording-btn').addEventListener('click', deleteRecording);
+        document.getElementById('export-recording-btn').addEventListener('click', exportRecording);
 
         loadPresetsFromStorage();
         loadRecordingsFromStorage();
@@ -1087,6 +1090,74 @@
         } catch (e) {
             console.error('Error loading recordings:', e);
         }
+    }
+
+    function writeVarLen(value, out) {
+        let buffer = value & 0x7F;
+        while ((value >>= 7)) {
+            buffer <<= 8;
+            buffer |= ((value & 0x7F) | 0x80);
+        }
+        while (true) {
+            out.push(buffer & 0xFF);
+            if (buffer & 0x80) {
+                buffer >>= 8;
+            } else {
+                break;
+            }
+        }
+    }
+
+    function buildMidiFile(events) {
+        const TPQ = 480; // ticks per quarter note
+        const MS_PER_BEAT = 500; // 120 BPM, so 1 tick ≈ 1.04ms
+
+        const track = [];
+        // Tempo meta event: 500000 µs per beat
+        track.push(0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20);
+
+        const sorted = [...events].sort((a, b) => a.t - b.t);
+        let lastTick = 0;
+        sorted.forEach(ev => {
+            const tick = Math.round(ev.t * TPQ / MS_PER_BEAT);
+            writeVarLen(tick - lastTick, track);
+            lastTick = tick;
+            track.push(...ev.bytes);
+        });
+
+        track.push(0x00, 0xFF, 0x2F, 0x00); // end of track
+
+        const bytes = [
+            0x4D, 0x54, 0x68, 0x64, // MThd
+            0, 0, 0, 6, // header length
+            0, 0, // format 0
+            0, 1, // one track
+            (TPQ >> 8) & 0xFF, TPQ & 0xFF,
+            0x4D, 0x54, 0x72, 0x6B, // MTrk
+            (track.length >>> 24) & 0xFF,
+            (track.length >>> 16) & 0xFF,
+            (track.length >>> 8) & 0xFF,
+            track.length & 0xFF
+        ];
+        return new Uint8Array(bytes.concat(track));
+    }
+
+    function exportRecording() {
+        if (recordedEvents.length === 0) {
+            updateStatus('Nothing recorded to export');
+            return;
+        }
+
+        const data = buildMidiFile(recordedEvents);
+        const blob = new Blob([data], { type: 'audio/midi' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const selectedName = document.getElementById('recording-select').value;
+        a.download = (selectedName || 'midi-sampler-recording') + '.mid';
+        a.click();
+        URL.revokeObjectURL(url);
+        updateStatus(`Exported ${a.download}`);
     }
 
     function updateRecordingList() {
