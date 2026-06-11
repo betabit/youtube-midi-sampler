@@ -50,6 +50,37 @@
         return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
     }
 
+    function makeDraggable(el, handle) {
+        let dragging = false;
+        let offsetX = 0;
+        let offsetY = 0;
+
+        handle.style.cursor = 'move';
+        handle.addEventListener('mousedown', (e) => {
+            // Buttons and inputs in the handle keep their normal behavior
+            if (e.target.closest('button, input, select')) return;
+            dragging = true;
+            const rect = el.getBoundingClientRect();
+            offsetX = e.clientX - rect.left;
+            offsetY = e.clientY - rect.top;
+            // Switch from right-anchored to left-anchored positioning
+            el.style.left = rect.left + 'px';
+            el.style.top = rect.top + 'px';
+            el.style.right = 'auto';
+            e.preventDefault();
+        });
+        document.addEventListener('mousemove', (e) => {
+            if (!dragging) return;
+            const x = Math.min(Math.max(e.clientX - offsetX, 0), window.innerWidth - 80);
+            const y = Math.min(Math.max(e.clientY - offsetY, 0), window.innerHeight - 40);
+            el.style.left = x + 'px';
+            el.style.top = y + 'px';
+        });
+        document.addEventListener('mouseup', () => {
+            dragging = false;
+        });
+    }
+
     // Musical scales (semitones from root)
     const scales = {
         'chromatic': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
@@ -229,6 +260,7 @@
             </div>
         `;
         document.body.appendChild(panel);
+        makeDraggable(panel, panel.querySelector('.midi-panel-header'));
 
         overlayCanvas = document.createElement('canvas');
         overlayCanvas.id = 'midi-sampler-overlay';
