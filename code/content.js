@@ -188,7 +188,8 @@
     function setupEventListeners() {
         toggleBtn.addEventListener('click', () => {
             const isVisible = panel.style.display !== 'none';
-            panel.style.display = isVisible ? 'none' : 'block';
+            // 'flex' keeps the header/content column layout that resizing relies on
+            panel.style.display = isVisible ? 'none' : 'flex';
             if (!isVisible) {
                 updateCanvasSize();
             }

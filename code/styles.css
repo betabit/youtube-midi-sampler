@@ -38,6 +38,14 @@
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     z-index: 999999;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: column;
+    resize: both;
+    overflow: hidden;
+    min-width: 380px;
+    min-height: 160px;
+    max-width: 95vw;
+    max-height: 90vh;
 }
 
 .midi-panel-header {
@@ -78,7 +86,7 @@
 
 .midi-panel-content {
     padding: 15px;
-    max-height: 500px;
+    flex: 1;
     overflow-y: auto;
 }
 
